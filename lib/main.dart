@@ -16,7 +16,7 @@ class MyApp extends StatelessWidget {
   // Brand accent used in both themes.
   static const Color _accent = Color(0xFF1A73E8);
 
-  // ---- LIGHT THEME (only when user switches to it) ----
+  // ---- LIGHT THEME (only when user switches to it) ------
   ThemeData _lightTheme() {
     return ThemeData(
       colorScheme: ColorScheme.fromSeed(
