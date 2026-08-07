@@ -1,8 +1,19 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart' as fb_auth;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:uuid/uuid.dart';
 import '../models/user_model.dart';
+import '../models/emergency_contact_model.dart';
+import '../models/user_activity_model.dart';
+import '../core/services/auth_service.dart';
+import '../core/services/firestore_service.dart';
 
 class AuthProvider extends ChangeNotifier {
+  final AuthService _authService = AuthService();
+  final FirestoreService _firestoreService = FirestoreService();
+  StreamSubscription<fb_auth.User?>? _authSub;
+
   UserModel? _currentUser;
   bool _isLoading = false;
   bool _isLoggedIn = false;
@@ -11,124 +22,96 @@ class AuthProvider extends ChangeNotifier {
   bool get isLoading => _isLoading;
   bool get isLoggedIn => _isLoggedIn;
 
-  // SharedPreferences keys
-  static const _keyIsLoggedIn = 'isLoggedIn';
-  static const _keyUserName = 'userName';
-  static const _keyUserEmail = 'userEmail';
-  static const _keyUserPhone = 'userPhone';
-  static const _keyUserUid = 'userUid';
-  static const _keyContacts = 'userContacts';
+  // Local cache key — only used for the profile photo (kept out of
+  // Firestore to avoid bloating documents with base64 blobs).
+  static const _keyProfileImage = 'userProfileImageBase64';
 
   AuthProvider() {
-    _loadSession(); // App start aana auto load
+    _init();
   }
 
-  // Load saved session from SharedPreferences
-  Future<void> _loadSession() async {
+  // Listen to Firebase's own auth session — this is what gives us
+  // "stay logged in after app restart" for free, no manual prefs needed.
+  Future<void> _init() async {
     _setLoading(true);
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final loggedIn = prefs.getBool(_keyIsLoggedIn) ?? false;
-
-      if (loggedIn) {
-        final uid = prefs.getString(_keyUserUid) ?? '';
-        final name = prefs.getString(_keyUserName) ?? '';
-        final email = prefs.getString(_keyUserEmail) ?? '';
-        final phone = prefs.getString(_keyUserPhone) ?? '';
-        final contacts = prefs.getStringList(_keyContacts) ?? [];
-
-        if (uid.isNotEmpty && email.isNotEmpty) {
-          _currentUser = UserModel(
-            uid: uid,
-            fullName: name,
-            email: email,
-            phoneNumber: phone,
-            approvedContacts: contacts,
-            isLocationSharing: false,
-            createdAt: DateTime.now(),
-            updatedAt: DateTime.now(),
-          );
-          _isLoggedIn = true;
-        }
+    _authSub = _authService.authStateChanges.listen((fbUser) async {
+      if (fbUser == null) {
+        _currentUser = null;
+        _isLoggedIn = false;
+        notifyListeners();
+        return;
       }
-    } catch (e) {
-      _isLoggedIn = false;
-    }
+      final data = await _authService.getUserData(fbUser.uid);
+      final prefs = await SharedPreferences.getInstance();
+      final cachedImage = prefs.getString(_keyProfileImage);
+
+      final emergencyContacts = (data?['emergencyContacts'] as List<dynamic>? ?? [])
+          .map((e) => EmergencyContact.fromMap(Map<String, dynamic>.from(e as Map)))
+          .toList();
+
+      // approvedContacts should always exactly mirror the emails of real,
+      // currently-saved emergency contacts. If it doesn't (e.g. leftover
+      // "Name: Phone" strings from a legacy quick-add flow that never
+      // created a matching EmergencyContact — those had no way to ever be
+      // removed by the user), heal it here rather than let stale/garbage
+      // entries silently inflate the Contacts count and Safety Score
+      // forever.
+      final validEmails = emergencyContacts.where((c) => c.email.isNotEmpty).map((c) => c.email).toSet();
+      final storedApproved = List<String>.from(data?['approvedContacts'] ?? []);
+      final cleanedApproved = storedApproved.where(validEmails.contains).toList();
+      if (cleanedApproved.length != storedApproved.length) {
+        unawaited(_authService.updateUserData(fbUser.uid, {'approvedContacts': cleanedApproved}));
+      }
+
+      _currentUser = UserModel(
+        uid: fbUser.uid,
+        fullName: data?['fullName'] ?? fbUser.displayName ?? '',
+        email: data?['email'] ?? fbUser.email ?? '',
+        phoneNumber: data?['phoneNumber'] ?? '',
+        profileImageUrl: data?['profileImageUrl'] ?? cachedImage,
+        approvedContacts: cleanedApproved,
+        emergencyContacts: emergencyContacts,
+        isLocationSharing: data?['isLocationSharing'] ?? false,
+        createdAt: DateTime.now(),
+        updatedAt: DateTime.now(),
+      );
+      _isLoggedIn = true;
+      notifyListeners();
+    });
     _setLoading(false);
   }
 
-  // Save session to SharedPreferences
-  Future<void> _saveSession(UserModel user) async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setBool(_keyIsLoggedIn, true);
-      await prefs.setString(_keyUserUid, user.uid);
-      await prefs.setString(_keyUserName, user.fullName);
-      await prefs.setString(_keyUserEmail, user.email);
-      await prefs.setString(_keyUserPhone, user.phoneNumber);
-      await prefs.setStringList(_keyContacts, user.approvedContacts);
-    } catch (e) {
-      // Silent fail
-    }
+  @override
+  void dispose() {
+    _authSub?.cancel();
+    super.dispose();
   }
 
-  // Clear session
-  Future<void> _clearSession() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.remove(_keyIsLoggedIn);
-      await prefs.remove(_keyUserUid);
-      await prefs.remove(_keyUserName);
-      await prefs.remove(_keyUserEmail);
-      await prefs.remove(_keyUserPhone);
-      await prefs.remove(_keyContacts);
-    } catch (e) {
-      // Silent fail
-    }
-  }
-
-  // Login
+  // Login — real Firebase Auth
   Future<Map<String, dynamic>> login({
     required String email,
     required String password,
   }) async {
     _setLoading(true);
-    await Future.delayed(const Duration(milliseconds: 800));
-
-    // TODO: Replace with Firebase auth
-    if (email.trim().isEmpty || password.trim().isEmpty) {
-      _setLoading(false);
-      return {'success': false, 'error': 'Email and password required'};
-    }
-    if (password.length < 6) {
-      _setLoading(false);
-      return {'success': false, 'error': 'Invalid credentials'};
-    }
-
-    // Create user from entered credentials
-    _currentUser = UserModel(
-      uid: 'uid_${email.hashCode.abs()}',
-      fullName: email.split('@').first.replaceAll('.', ' ').split(' ')
-          .map((w) => w.isNotEmpty ? '${w[0].toUpperCase()}${w.substring(1)}' : '')
-          .join(' '),
-      email: email.trim(),
-      phoneNumber: '',
-      approvedContacts: ['Amma: +91 XXXXX XXXXX', 'Appa: +91 XXXXX XXXXX', 'Friend: +91 XXXXX XXXXX'],
-      isLocationSharing: false,
-      createdAt: DateTime.now(),
-      updatedAt: DateTime.now(),
-    );
-    _isLoggedIn = true;
-
-    // Save session — app close aanalum persist aagum
-    await _saveSession(_currentUser!);
-
+    final result = await _authService.signIn(email: email, password: password);
     _setLoading(false);
-    notifyListeners();
+    if (result['success'] != true) {
+      return {'success': false, 'error': result['error']};
+    }
+    // Real login event, written to Firestore immediately — feeds the
+    // "Login Successfully" entry on the Notifications screen.
+    final fbUser = result['user'] as fb_auth.User?;
+    if (fbUser != null) {
+      unawaited(_firestoreService.logActivity(fbUser.uid, UserActivityType.login));
+    }
+    // _authSub listener above fills in _currentUser once Firebase confirms
+    // the session, but we also do it here so the caller's immediate
+    // `if (result['success'])` navigation doesn't race the stream.
+    await Future.delayed(const Duration(milliseconds: 300));
     return {'success': true};
   }
 
-  // Signup
+  // Signup — real Firebase Auth + Firestore user doc
   Future<Map<String, dynamic>> signUp({
     required String fullName,
     required String email,
@@ -136,114 +119,197 @@ class AuthProvider extends ChangeNotifier {
     required String phoneNumber,
   }) async {
     _setLoading(true);
-    await Future.delayed(const Duration(milliseconds: 800));
-
-    // TODO: Replace with Firebase auth
-    _currentUser = UserModel(
-      uid: 'uid_${DateTime.now().millisecondsSinceEpoch}',
+    final result = await _authService.signUp(
       fullName: fullName.trim(),
       email: email.trim(),
+      password: password,
       phoneNumber: phoneNumber.trim(),
-      approvedContacts: ['Amma: +91 XXXXX XXXXX', 'Appa: +91 XXXXX XXXXX', 'Friend: +91 XXXXX XXXXX'],
-      isLocationSharing: false,
-      createdAt: DateTime.now(),
-      updatedAt: DateTime.now(),
     );
-    _isLoggedIn = true;
-
-    // Save session
-    await _saveSession(_currentUser!);
-
     _setLoading(false);
-    notifyListeners();
+    if (result['success'] != true) {
+      return {'success': false, 'error': result['error']};
+    }
+    await Future.delayed(const Duration(milliseconds: 300));
     return {'success': true};
   }
 
-  // Logout — clear session
+  // Logout
   Future<void> logout() async {
     _setLoading(true);
-    await Future.delayed(const Duration(milliseconds: 300));
-    // TODO: Firebase signOut
+    // Log the real logout event before the session/uid disappear —
+    // feeds the "Logout" entry on the Notifications screen.
+    if (_currentUser != null) {
+      unawaited(_firestoreService.logActivity(_currentUser!.uid, UserActivityType.logout));
+    }
+    await _authService.signOut();
     _currentUser = null;
     _isLoggedIn = false;
-    await _clearSession(); // Clear saved session
     _setLoading(false);
     notifyListeners();
   }
 
-  // Reset password
+  // Reset password — real Firebase email
   Future<Map<String, dynamic>> resetPassword(String email) async {
     _setLoading(true);
-    await Future.delayed(const Duration(milliseconds: 800));
-    // TODO: Firebase reset password
+    final result = await _authService.resetPassword(email.trim());
     _setLoading(false);
-    return {'success': true};
+    return result;
   }
 
-  // Add contact — save to prefs
-  Future<bool> addContact(String email) async {
+  // Add a named emergency contact (name + phone + optional email + relation).
+  // approvedContacts (emails) is always fully rebuilt from emergencyContacts
+  // below — never patched incrementally — so it can't drift out of sync.
+  Future<bool> addEmergencyContact({
+    required String name,
+    required String phone,
+    String email = '',
+    required String relation,
+  }) async {
     if (_currentUser == null) return false;
-    if (_currentUser!.approvedContacts.contains(email)) return false;
 
-    final updated = List<String>.from(_currentUser!.approvedContacts)..add(email);
-    _currentUser = _currentUser!.copyWith(approvedContacts: updated);
+    final contact = EmergencyContact(id: const Uuid().v4(), name: name, phone: phone, email: email, relation: relation);
+    final updatedContacts = List<EmergencyContact>.from(_currentUser!.emergencyContacts)..add(contact);
+    final updatedEmails = updatedContacts.where((c) => c.email.isNotEmpty).map((c) => c.email).toSet().toList();
 
-    // Save updated contacts
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setStringList(_keyContacts, updated);
-    } catch (e) {}
+    final ok = await _authService.updateUserData(_currentUser!.uid, {
+      'emergencyContacts': updatedContacts.map((e) => e.toMap()).toList(),
+      'approvedContacts': updatedEmails,
+    });
+    if (!ok) return false;
 
+    _currentUser = _currentUser!.copyWith(emergencyContacts: updatedContacts, approvedContacts: updatedEmails);
     notifyListeners();
     return true;
   }
 
-  // Remove contact — save to prefs
-  Future<bool> removeContact(String email) async {
+  // Edit an existing emergency contact in place.
+  Future<bool> updateEmergencyContact({
+    required String id,
+    required String name,
+    required String phone,
+    String email = '',
+    required String relation,
+  }) async {
     if (_currentUser == null) return false;
+    final list = _currentUser!.emergencyContacts;
+    final index = list.indexWhere((c) => c.id == id);
+    if (index == -1) return false;
 
-    final updated = List<String>.from(_currentUser!.approvedContacts)..remove(email);
-    _currentUser = _currentUser!.copyWith(approvedContacts: updated);
+    final updatedContacts = List<EmergencyContact>.from(list);
+    updatedContacts[index] = list[index].copyWith(name: name, phone: phone, email: email, relation: relation);
+    final updatedEmails = updatedContacts.where((c) => c.email.isNotEmpty).map((c) => c.email).toSet().toList();
 
-    // Save updated contacts
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setStringList(_keyContacts, updated);
-    } catch (e) {}
+    final ok = await _authService.updateUserData(_currentUser!.uid, {
+      'emergencyContacts': updatedContacts.map((e) => e.toMap()).toList(),
+      'approvedContacts': updatedEmails,
+    });
+    if (!ok) return false;
 
+    _currentUser = _currentUser!.copyWith(emergencyContacts: updatedContacts, approvedContacts: updatedEmails);
     notifyListeners();
     return true;
   }
 
-  // Toggle location sharing
+  // Delete an emergency contact — approvedContacts is rebuilt from what's
+  // left, so the removed contact's email (if any) is gone with it, and it
+  // can never come back as a leftover.
+  Future<bool> deleteEmergencyContact(String id) async {
+    if (_currentUser == null) return false;
+    final list = _currentUser!.emergencyContacts;
+    final target = list.where((c) => c.id == id).toList();
+    if (target.isEmpty) return false;
+
+    final updatedContacts = list.where((c) => c.id != id).toList();
+    final updatedEmails = updatedContacts.where((c) => c.email.isNotEmpty).map((c) => c.email).toSet().toList();
+
+    final ok = await _authService.updateUserData(_currentUser!.uid, {
+      'emergencyContacts': updatedContacts.map((e) => e.toMap()).toList(),
+      'approvedContacts': updatedEmails,
+    });
+    if (!ok) return false;
+
+    _currentUser = _currentUser!.copyWith(emergencyContacts: updatedContacts, approvedContacts: updatedEmails);
+    notifyListeners();
+    return true;
+  }
+
+  // Toggle location sharing — Firestore + local model update
   Future<void> toggleLocationSharing() async {
     if (_currentUser == null) return;
-    _currentUser = _currentUser!.copyWith(
-        isLocationSharing: !_currentUser!.isLocationSharing);
+    await setLocationSharing(!_currentUser!.isLocationSharing);
+  }
+
+  // Explicitly set location sharing to match what's really happening —
+  // called by the real live-location start/stop flow (Live Location
+  // screen) so the Safety Score's Location Sharing factor reflects the
+  // user's actual GPS sharing action, not just this standalone switch.
+  Future<void> setLocationSharing(bool value) async {
+    if (_currentUser == null || _currentUser!.isLocationSharing == value) return;
+    await _authService.updateUserData(_currentUser!.uid, {
+      'isLocationSharing': value,
+    });
+    _currentUser = _currentUser!.copyWith(isLocationSharing: value);
+    // Log only the moment sharing turns on — feeds the real "Live
+    // Location Shared" entry on the Notifications screen.
+    if (value) {
+      unawaited(_firestoreService.logActivity(_currentUser!.uid, UserActivityType.locationShared));
+    }
     notifyListeners();
   }
 
-  // Update profile — save to prefs
+  // Update profile — Firestore + local model update
   Future<bool> updateProfile({String? fullName, String? phoneNumber}) async {
     if (_currentUser == null) return false;
     _setLoading(true);
-    await Future.delayed(const Duration(milliseconds: 300));
 
-    _currentUser = _currentUser!.copyWith(
-      fullName: fullName ?? _currentUser!.fullName,
-      phoneNumber: phoneNumber ?? _currentUser!.phoneNumber,
-    );
+    final data = <String, dynamic>{};
+    if (fullName != null) data['fullName'] = fullName;
+    if (phoneNumber != null) data['phoneNumber'] = phoneNumber;
 
-    // Save updated profile
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(_keyUserName, _currentUser!.fullName);
-      await prefs.setString(_keyUserPhone, _currentUser!.phoneNumber);
-    } catch (e) {}
-
+    final ok = await _authService.updateUserData(_currentUser!.uid, data);
+    if (ok) {
+      _currentUser = _currentUser!.copyWith(
+        fullName: fullName ?? _currentUser!.fullName,
+        phoneNumber: phoneNumber ?? _currentUser!.phoneNumber,
+      );
+    }
     _setLoading(false);
     notifyListeners();
+    return ok;
+  }
+
+  // Update profile photo — stored as base64 string, same as before.
+  // Kept in local prefs (not Firestore) to avoid document bloat; swap
+  // this for Firebase Storage upload later if you want it synced across
+  // devices.
+  Future<bool> updateProfileImage(String base64Image) async {
+    if (_currentUser == null) return false;
+    _currentUser = _currentUser!.copyWith(profileImageUrl: base64Image);
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_keyProfileImage, base64Image);
+    } catch (e) {
+      // Silent fail — non-critical
+    }
+
+    notifyListeners();
     return true;
+  }
+
+  // Remove profile photo
+  Future<void> removeProfileImage() async {
+    if (_currentUser == null) return;
+    _currentUser = _currentUser!.copyWith(profileImageUrl: null);
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_keyProfileImage);
+    } catch (e) {
+      // Silent fail
+    }
+
+    notifyListeners();
   }
 
   void _setLoading(bool value) {

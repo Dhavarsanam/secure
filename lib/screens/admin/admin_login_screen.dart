@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'admin_dashboard_screen.dart';
-import '../../utils/app_icon_colors.dart';
 
 class AdminLoginScreen extends StatefulWidget {
   const AdminLoginScreen({super.key});
@@ -18,6 +17,11 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
   // Demo credentials
   static const _adminEmail = 'admin@secureride.com';
   static const _adminPass = 'admin123';
+
+  // Admin-branded palette (purple accent kept for admin identity)
+  static const Color _tp = Colors.white;        // primary text
+  static const Color _ts = Color(0xFFCBC9E8);   // secondary text
+  static const Color _accent = Color(0xFF9333EA);
 
   @override
   void dispose() { _emailCtrl.dispose(); _passCtrl.dispose(); super.dispose(); }
@@ -37,73 +41,102 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: Container(
-        width: double.infinity, height: double.infinity,
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            colors: [Color(0xFF4F46E5), Color(0xFF7C3AED), Color(0xFF9333EA)],
-            begin: Alignment.topLeft, end: Alignment.bottomRight,
+      backgroundColor: const Color(0xFF0A0E1A),
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          // ---- Background image ----
+          Image.asset(
+            'assets/images/image1.png',
+            fit: BoxFit.cover,
+            alignment: Alignment.bottomCenter,
+            errorBuilder: (_, __, ___) => const ColoredBox(color: Color(0xFF0A0E1A)),
           ),
-        ),
-        child: SafeArea(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.all(24),
-            child: Column(children: [
-              const SizedBox(height: 40),
-              Container(width: 90, height: 90,
-                  decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(24),
-                      boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.2), blurRadius: 30, offset: const Offset(0, 10))]),
-                  child: const Icon(Icons.admin_panel_settings_rounded, color: Color(0xFF7C3AED), size: 48)),
-              const SizedBox(height: 20),
-              const Text('Admin Panel', style: TextStyle(fontSize: 32, fontWeight: FontWeight.bold, color: Colors.white)),
-              const Text('SecureRide Management', style: TextStyle(color: Colors.white70, fontSize: 14)),
-              const SizedBox(height: 48),
 
-              // Login Card
-              Container(
-                padding: const EdgeInsets.all(24),
-                decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20),
-                    boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.1), blurRadius: 30)]),
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  const Text('Sign In', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Color(0xFF1A1A2E))),
+          // ---- Dark + purple-tinted scrim ----
+          DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [
+                  const Color(0xFF1A0B2E).withValues(alpha: 0.38),
+                  const Color(0xFF0B0716).withValues(alpha: 0.28),
+                  const Color(0xFF0B0716).withValues(alpha: 0.60),
+                ],
+                stops: const [0.0, 0.5, 1.0],
+              ),
+            ),
+          ),
+
+          // ---- Content (NO card — fields directly on background) ----
+          SafeArea(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.symmetric(horizontal: 28),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const SizedBox(height: 44),
+                  Center(
+                    child: Container(width: 90, height: 90,
+                        decoration: BoxDecoration(color: _accent, borderRadius: BorderRadius.circular(24),
+                            boxShadow: [BoxShadow(color: _accent.withValues(alpha: 0.5), blurRadius: 30, offset: const Offset(0, 10))]),
+                        child: const Icon(Icons.admin_panel_settings_rounded, color: Colors.white, size: 48)),
+                  ),
+                  const SizedBox(height: 20),
+                  const Text('Admin Panel',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(fontSize: 32, fontWeight: FontWeight.bold, color: _tp,
+                          shadows: [Shadow(color: Colors.black54, blurRadius: 12)])),
+                  const Text('SecureRide Management',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: _ts, fontSize: 14)),
+                  const SizedBox(height: 44),
+
+                  const Text('Sign In', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: _tp,
+                      shadows: [Shadow(color: Colors.black54, blurRadius: 10)])),
                   const SizedBox(height: 4),
-                  const Text('Enter your admin credentials', style: TextStyle(color: Color(0xFF6B7280), fontSize: 13)),
+                  const Text('Enter your admin credentials', style: TextStyle(color: _ts, fontSize: 13)),
                   const SizedBox(height: 24),
 
                   TextField(
                     controller: _emailCtrl,
                     keyboardType: TextInputType.emailAddress,
+                    style: const TextStyle(color: _tp),
                     decoration: _inputDecoration('Admin Email', Icons.email_outlined),
                   ),
                   const SizedBox(height: 16),
                   TextField(
                     controller: _passCtrl,
                     obscureText: _obscure,
+                    style: const TextStyle(color: _tp),
                     decoration: _inputDecoration('Password', Icons.lock_outline).copyWith(
                       suffixIcon: IconButton(
-                          icon: Icon(_obscure ? Icons.visibility_off_outlined : Icons.visibility_outlined, color: appIconColor(_obscure ? Icons.visibility_off_outlined : Icons.visibility_outlined)),
+                          icon: Icon(_obscure ? Icons.visibility_off_outlined : Icons.visibility_outlined, color: _ts),
                           onPressed: () => setState(() => _obscure = !_obscure)),
                     ),
                   ),
 
                   if (_error != null) ...[
-                    const SizedBox(height: 10),
+                    const SizedBox(height: 12),
                     Container(padding: const EdgeInsets.all(10),
-                        decoration: BoxDecoration(color: const Color(0xFFEF4444).withValues(alpha: 0.1), borderRadius: BorderRadius.circular(8)),
+                        decoration: BoxDecoration(color: const Color(0xFFEF4444).withValues(alpha: 0.15), borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: const Color(0xFFEF4444).withValues(alpha: 0.4))),
                         child: Row(children: [
-                          const Icon(Icons.error_outline, color: Color(0xFFEF4444), size: 16),
+                          const Icon(Icons.error_outline, color: Color(0xFFFCA5A5), size: 16),
                           const SizedBox(width: 6),
-                          Text(_error!, style: const TextStyle(color: Color(0xFFEF4444), fontSize: 12)),
+                          Text(_error!, style: const TextStyle(color: Color(0xFFFCA5A5), fontSize: 12)),
                         ])),
                   ],
 
                   const SizedBox(height: 24),
-                  SizedBox(width: double.infinity, height: 50,
+                  SizedBox(width: double.infinity, height: 52,
                       child: ElevatedButton(
                         onPressed: _loading ? null : _login,
                         style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFF7C3AED), foregroundColor: Colors.white,
+                            backgroundColor: _accent, foregroundColor: Colors.white,
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                            elevation: 0,
                             textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
                         child: _loading
                             ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2.5))
@@ -112,36 +145,41 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
 
                   const SizedBox(height: 16),
                   Container(padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(color: const Color(0xFF7C3AED).withValues(alpha: 0.06), borderRadius: BorderRadius.circular(10)),
+                      decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.06), borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: Colors.white.withValues(alpha: 0.14))),
                       child: Row(children: [
-                        const Icon(Icons.info_outline, color: Color(0xFF7C3AED), size: 16),
+                        const Icon(Icons.info_outline, color: Color(0xFFC4B5FD), size: 16),
                         const SizedBox(width: 8),
-                        const Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                          Text('Demo Credentials', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF7C3AED))),
-                          Text('Email: admin@secureride.com', style: TextStyle(fontSize: 11, color: Color(0xFF6B7280))),
-                          Text('Password: admin123', style: TextStyle(fontSize: 11, color: Color(0xFF6B7280))),
+                        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                          const Text('Demo Credentials', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFFC4B5FD))),
+                          Text('Email: admin@secureride.com', style: TextStyle(fontSize: 11, color: _ts.withValues(alpha: 0.85))),
+                          Text('Password: admin123', style: TextStyle(fontSize: 11, color: _ts.withValues(alpha: 0.85))),
                         ])),
                       ])),
-                ]),
-              ),
 
-              const SizedBox(height: 24),
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text('← Back to App', style: TextStyle(color: Colors.white70, fontSize: 14)),
+                  const SizedBox(height: 24),
+                  Center(
+                    child: TextButton(
+                      onPressed: () => Navigator.pop(context),
+                      child: const Text('← Back to App', style: TextStyle(color: _ts, fontSize: 14)),
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                ],
               ),
-            ]),
+            ),
           ),
-        ),
+        ],
       ),
     );
   }
 
   InputDecoration _inputDecoration(String label, IconData icon) => InputDecoration(
-    labelText: label, prefixIcon: Icon(icon, color: appIconColor(icon)),
-    filled: true, fillColor: const Color(0xFFF5F7FA),
-    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Color(0xFFE5E7EB))),
-    enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Color(0xFFE5E7EB))),
-    focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Color(0xFF7C3AED), width: 2)),
+    labelText: label, labelStyle: const TextStyle(color: _ts),
+    prefixIcon: Icon(icon, color: _ts),
+    filled: true, fillColor: Colors.white.withValues(alpha: 0.08),
+    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.22))),
+    enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.22))),
+    focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: _accent, width: 2)),
   );
 }

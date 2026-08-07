@@ -1,8 +1,13 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/trip_provider.dart';
 import '../../providers/theme_provider.dart';
+import '../../core/constants/madurai_places.dart';
+import '../../core/constants/tn_districts.dart';
+import '../../core/constants/app_strings.dart';
+import '../../core/utils/helpers.dart';
 import '../home/home_screen.dart';
 import '../../utils/app_icon_colors.dart';
 
@@ -12,69 +17,266 @@ class CreateTripScreen extends StatefulWidget {
   State<CreateTripScreen> createState() => _CreateTripScreenState();
 }
 
-class _CreateTripScreenState extends State<CreateTripScreen> {
-  final _formKey = GlobalKey<FormState>();
-  final _fromCtrl = TextEditingController(text: 'Fathima College for Women, Madurai');
-  final _toCtrl = TextEditingController();
-  DateTime _date = DateTime.now().add(const Duration(days: 1));
-  TimeOfDay _time = const TimeOfDay(hour: 10, minute: 0);
-  String _vehicleType = 'Sedan';
-  int _seats = 3;
-  double _farePerSeat = 250;
-  bool _isLoading = false;
+// One combined suggestion type so a Madurai locality and a TN district
+// headquarters town can sit side by side in the same suggestions list.
+class _PlaceSuggestion {
+  final String name;
+  final double lat;
+  final double lng;
+  final String subtitle; // 'Madurai' for city localities, or the district name for districts
+  const _PlaceSuggestion({required this.name, required this.lat, required this.lng, required this.subtitle});
+}
 
-  // Spec: SUV, Sedan, Van vehicle icons
-  final List<Map<String, dynamic>> _vehicles = [
-    {'name': 'Bike', 'icon': Icons.two_wheeler_rounded},
-    {'name': 'Sedan', 'icon': Icons.directions_car_rounded},
-    {'name': 'SUV', 'icon': Icons.directions_car_filled_rounded},
-    {'name': 'Van', 'icon': Icons.airport_shuttle_rounded},
-    {'name': 'Auto', 'icon': Icons.electric_rickshaw_rounded},
-    {'name': 'Bus', 'icon': Icons.directions_bus_rounded},
-  ];
+// Local, offline lookup — no network call. Merges the closest Madurai
+// locality matches with the closest TN district matches so typing e.g.
+// "Din" surfaces both a Madurai area (if any) and "Dindigul" together.
+List<_PlaceSuggestion> _searchPlaces(String query) {
+  final maduraiMatches = searchMaduraiPlaces(query, limit: 3)
+      .map((p) => _PlaceSuggestion(name: p.name, lat: p.lat, lng: p.lng, subtitle: 'Madurai'));
+  final districtMatches = searchTnDistricts(query, limit: 3)
+      .map((d) => _PlaceSuggestion(name: d.name, lat: d.lat, lng: d.lng, subtitle: d.district));
+  return [...maduraiMatches, ...districtMatches];
+}
+
+// Maximum seats allowed per vehicle type — the seat counter is clamped
+// to this so the app never lets someone pick more seats than the
+// vehicle can actually hold.
+int maxSeatsForVehicle(String vehicleType) {
+  switch (vehicleType) {
+    case 'Car': return 4;
+    case 'Bike': return 1;
+    case 'Auto': return 3;
+    case 'Van': return 8;
+    case 'Bus': return 25;
+    default: return 4;
+  }
+}
+
+class _CreateTripScreenState extends State<CreateTripScreen> {
+  final _startCtrl = TextEditingController();
+  final _destCtrl = TextEditingController();
+
+  double? _startLat, _startLng;
+  double? _destLat, _destLng;
+
+  List<_PlaceSuggestion> _startSuggestions = [];
+  List<_PlaceSuggestion> _destSuggestions = [];
+
+  DateTime? _travelDate;
+  String _passengerType = AppStrings.passengerTypes.first;
+  String _vehicleType = AppStrings.vehicleTypes.first;
+  // Starts at 0 — the user has to actively add seats with the + button
+  // rather than a default already being picked for them.
+  int _seats = 0;
+  bool _isCreating = false;
 
   @override
-  void dispose() { _fromCtrl.dispose(); _toCtrl.dispose(); super.dispose(); }
+  void dispose() {
+    _startCtrl.dispose();
+    _destCtrl.dispose();
+    super.dispose();
+  }
 
-  Future<void> _submit() async {
-    if (!_formKey.currentState!.validate()) return;
-    setState(() => _isLoading = true);
+  void _onStartChanged(String q) {
+    setState(() {
+      _startLat = null;
+      _startLng = null;
+      _startSuggestions = _searchPlaces(q);
+    });
+  }
+
+  void _onDestChanged(String q) {
+    setState(() {
+      _destLat = null;
+      _destLng = null;
+      _destSuggestions = _searchPlaces(q);
+    });
+  }
+
+  void _pickStart(_PlaceSuggestion p) {
+    setState(() {
+      _startCtrl.text = p.name;
+      _startLat = p.lat; _startLng = p.lng;
+      _startSuggestions = [];
+    });
+    FocusScope.of(context).unfocus();
+  }
+
+  void _pickDest(_PlaceSuggestion p) {
+    setState(() {
+      _destCtrl.text = p.name;
+      _destLat = p.lat; _destLng = p.lng;
+      _destSuggestions = [];
+    });
+    FocusScope.of(context).unfocus();
+  }
+
+  Future<void> _pickDateTime() async {
+    final now = DateTime.now();
+    final date = await showDatePicker(
+      context: context,
+      initialDate: _travelDate ?? now.add(const Duration(hours: 1)),
+      firstDate: now,
+      lastDate: now.add(const Duration(days: 365)),
+    );
+    if (date == null || !mounted) return;
+    final time = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.fromDateTime(_travelDate ?? now.add(const Duration(hours: 1))),
+    );
+    if (time == null) return;
+    setState(() {
+      _travelDate = DateTime(date.year, date.month, date.day, time.hour, time.minute);
+    });
+  }
+
+  Future<void> _create() async {
+    if (_startLat == null || _startLng == null) {
+      _showError('Pick a start location from the suggestions.');
+      return;
+    }
+    if (_destLat == null || _destLng == null) {
+      _showError('Pick a destination from the suggestions.');
+      return;
+    }
+    if (_travelDate == null) {
+      _showError('Choose a travel date and time.');
+      return;
+    }
+    if (_travelDate!.isBefore(DateTime.now())) {
+      _showError('Travel date and time must be in the future.');
+      return;
+    }
+    if (_seats <= 0) {
+      _showError('Add at least 1 available seat.');
+      return;
+    }
+
+    setState(() => _isCreating = true);
     final auth = context.read<AuthProvider>();
     final result = await context.read<TripProvider>().createTrip(
       creatorUid: auth.currentUser?.uid ?? '',
       creatorName: auth.currentUser?.fullName ?? '',
       creatorEmail: auth.currentUser?.email ?? '',
-      startLocationName: _fromCtrl.text.trim(),
-      startLat: 9.9601, startLng: 78.0766,
-      destinationName: _toCtrl.text.trim(),
-      destinationLat: 9.9252, destinationLng: 78.1198,
-      travelDate: DateTime(_date.year, _date.month, _date.day, _time.hour, _time.minute),
-      passengerType: 'Women Only',
+      startLocationName: _startCtrl.text.trim(),
+      startLat: _startLat!, startLng: _startLng!,
+      destinationName: _destCtrl.text.trim(),
+      destinationLat: _destLat!, destinationLng: _destLng!,
+      travelDate: _travelDate!,
+      passengerType: _passengerType,
       vehicleType: _vehicleType,
       availableSeats: _seats,
     );
     if (!mounted) return;
-    setState(() => _isLoading = false);
-    if (result['success']) {
-      final code = result['tripCode'];
-      showDialog(context: context, barrierDismissible: false,
-          builder: (_) => AlertDialog(
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-            title: const Row(children: [Icon(Icons.check_circle_rounded, color: Color(0xFF22C55E), size: 26), SizedBox(width: 8), Text('Trip Created!')]),
-            content: Column(mainAxisSize: MainAxisSize.min, children: [
-              const Text('Share this code with passengers:'),
-              const SizedBox(height: 12),
-              Container(padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                  decoration: BoxDecoration(color: const Color(0xFF1A73E8).withValues(alpha: 0.1), borderRadius: BorderRadius.circular(12)),
-                  child: Text(code, style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Color(0xFF1A73E8), letterSpacing: 4))),
-            ]),
-            actions: [ElevatedButton(
-                onPressed: () => Navigator.pushAndRemoveUntil(context, MaterialPageRoute(builder: (_) => const HomeScreen()), (_) => false),
-                style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF1A73E8), foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
-                child: const Text('Go to Dashboard'))],
-          ));
+    setState(() => _isCreating = false);
+
+    if (result['success'] == true) {
+      _showSuccessDialog(result['tripCode'] as String);
+    } else {
+      _showError(result['error']?.toString() ?? 'Could not create trip. Try again.');
     }
+  }
+
+  void _showError(String msg) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(msg),
+        backgroundColor: const Color(0xFFEF4444),
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        margin: const EdgeInsets.all(16)));
+  }
+
+  void _showSuccessDialog(String code) {
+    final isDark = context.read<ThemeProvider>().isDarkMode;
+    final card = isDark ? const Color(0xFF1A1A2E) : Colors.white;
+    final tp = isDark ? const Color(0xFFF1F5F9) : const Color(0xFF1A1A2E);
+    final ts = isDark ? const Color(0xFF94A3B8) : const Color(0xFF6B7280);
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (dctx) => AlertDialog(
+        backgroundColor: card,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        title: Row(children: [
+          const Icon(Icons.check_circle_rounded, color: Color(0xFF22C55E), size: 26),
+          const SizedBox(width: 8),
+          Text('Trip Created!', style: TextStyle(color: tp, fontWeight: FontWeight.bold, fontSize: 17)),
+        ]),
+        content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('Share this code so others can join your trip:', style: TextStyle(color: ts, fontSize: 13)),
+          const SizedBox(height: 14),
+          GestureDetector(
+            onTap: () {
+              Clipboard.setData(ClipboardData(text: code));
+              ScaffoldMessenger.of(dctx).showSnackBar(SnackBar(
+                  content: const Text('Trip code copied!'),
+                  backgroundColor: const Color(0xFF1A73E8),
+                  behavior: SnackBarBehavior.floating,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  margin: const EdgeInsets.all(16),
+                  duration: const Duration(seconds: 2)));
+            },
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(vertical: 16),
+              decoration: BoxDecoration(
+                  color: const Color(0xFF1A73E8).withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: const Color(0xFF1A73E8).withValues(alpha: 0.3))),
+              child: Column(children: [
+                Text(code, style: const TextStyle(color: Color(0xFF1A73E8), fontSize: 26, fontWeight: FontWeight.bold, letterSpacing: 3)),
+                const SizedBox(height: 4),
+                Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                  Icon(Icons.copy_rounded, size: 13, color: appIconColor(Icons.copy_rounded)),
+                  const SizedBox(width: 4),
+                  Text('Tap to copy', style: TextStyle(color: ts, fontSize: 11)),
+                ]),
+              ]),
+            ),
+          ),
+        ]),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.pop(dctx);
+              Navigator.pushAndRemoveUntil(context, MaterialPageRoute(builder: (_) => const HomeScreen()), (_) => false);
+            },
+            child: const Text('Done', style: TextStyle(color: Color(0xFF1A73E8), fontWeight: FontWeight.w600)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _suggestionsList(List<_PlaceSuggestion> list, void Function(_PlaceSuggestion) onPick, Color card, Color tp, Color ts) {
+    if (list.isEmpty) return const SizedBox.shrink();
+    return Container(
+      margin: const EdgeInsets.only(top: 4),
+      decoration: BoxDecoration(color: card, borderRadius: BorderRadius.circular(12),
+          boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.08), blurRadius: 8)]),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: list.map((p) => ListTile(
+          dense: true,
+          leading: Icon(
+              p.subtitle == 'Madurai' ? Icons.location_on_outlined : Icons.map_outlined,
+              size: 18, color: appIconColor(Icons.location_on_outlined)),
+          title: Text(p.name, style: TextStyle(color: tp, fontSize: 13, fontWeight: FontWeight.w500), maxLines: 1, overflow: TextOverflow.ellipsis),
+          subtitle: Text(p.subtitle == 'Madurai' ? 'Madurai' : '${p.subtitle} District',
+              style: TextStyle(color: ts, fontSize: 11)),
+          onTap: () => onPick(p),
+        )).toList(),
+      ),
+    );
+  }
+
+  String _formatDateTime(DateTime d) {
+    const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    final hour12 = d.hour % 12 == 0 ? 12 : d.hour % 12;
+    final ampm = d.hour >= 12 ? 'PM' : 'AM';
+    final minute = d.minute.toString().padLeft(2, '0');
+    return '${d.day} ${months[d.month - 1]} ${d.year}, $hour12:$minute $ampm';
   }
 
   @override
@@ -86,161 +288,200 @@ class _CreateTripScreenState extends State<CreateTripScreen> {
     final ts = isDark ? const Color(0xFF94A3B8) : const Color(0xFF6B7280);
     final border = isDark ? const Color(0xFF2D2D44) : const Color(0xFFE5E7EB);
 
+    InputDecoration fieldDecoration({required String hint, required IconData icon, Widget? suffix}) => InputDecoration(
+        hintText: hint,
+        hintStyle: TextStyle(color: ts, fontSize: 13),
+        prefixIcon: Icon(icon, color: const Color(0xFF1A73E8), size: 20),
+        suffixIcon: suffix,
+        filled: true, fillColor: card,
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: border)),
+        enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: border)),
+        focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Color(0xFF1A73E8), width: 1.5)),
+        contentPadding: const EdgeInsets.symmetric(vertical: 14));
+
     return Scaffold(
       backgroundColor: bg,
       appBar: AppBar(backgroundColor: const Color(0xFF1A73E8), foregroundColor: Colors.white,
           title: const Text('Create Trip', style: TextStyle(fontWeight: FontWeight.bold))),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
-        child: Form(key: _formKey, child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
 
-          _section('Route Details', tp),
+          // Start location
+          Text('Start Location', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: tp)),
+          const SizedBox(height: 10),
+          TextField(
+            controller: _startCtrl,
+            style: TextStyle(color: tp, fontSize: 14),
+            onChanged: _onStartChanged,
+            decoration: fieldDecoration(
+              hint: 'Search start location',
+              icon: Icons.radio_button_checked_rounded,
+            ),
+          ),
+          _suggestionsList(_startSuggestions, _pickStart, card, tp, ts),
+          const SizedBox(height: 16),
 
-          // From field
-          _label('From', ts),
-          TextFormField(controller: _fromCtrl, style: TextStyle(color: tp, fontSize: 14),
-              decoration: _deco('From location', Icons.radio_button_checked_rounded, const Color(0xFF1A73E8), card, border),
-              validator: (v) => v == null || v.trim().isEmpty ? 'Required' : null),
-          const SizedBox(height: 12),
+          // Destination
+          Text('Destination', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: tp)),
+          const SizedBox(height: 10),
+          TextField(
+            controller: _destCtrl,
+            style: TextStyle(color: tp, fontSize: 14),
+            onChanged: _onDestChanged,
+            decoration: fieldDecoration(
+              hint: 'Search destination',
+              icon: Icons.location_on_rounded,
+            ),
+          ),
+          _suggestionsList(_destSuggestions, _pickDest, card, tp, ts),
+          const SizedBox(height: 16),
 
-          // To field
-          _label('To', ts),
-          TextFormField(controller: _toCtrl, style: TextStyle(color: tp, fontSize: 14),
-              decoration: _deco('Destination', Icons.location_on_rounded, const Color(0xFFEF4444), card, border),
-              validator: (v) => v == null || v.trim().isEmpty ? 'Required' : null),
-          const SizedBox(height: 20),
-
-          _section('Travel Details', tp),
-
-          // Date picker
-          _label('Date', ts),
+          // Travel date & time
+          Text('Travel Date & Time', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: tp)),
+          const SizedBox(height: 10),
           GestureDetector(
-              onTap: () async {
-                final d = await showDatePicker(context: context, initialDate: _date,
-                    firstDate: DateTime.now(), lastDate: DateTime.now().add(const Duration(days: 90)));
-                if (d != null) setState(() => _date = d);
-              },
-              child: Container(padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(color: card, borderRadius: BorderRadius.circular(12), border: Border.all(color: border)),
-                  child: Row(children: [
-                    const Icon(Icons.calendar_today_rounded, color: Color(0xFF1A73E8), size: 20),
-                    const SizedBox(width: 10),
-                    Text('${_date.day} ${_monthName(_date.month)} ${_date.year}', style: TextStyle(color: tp, fontSize: 14)),
-                    const Spacer(),
-                    Icon(Icons.chevron_right_rounded, color: ts),
-                  ]))),
-          const SizedBox(height: 12),
+            onTap: _pickDateTime,
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 14),
+              decoration: BoxDecoration(color: card, borderRadius: BorderRadius.circular(12), border: Border.all(color: border)),
+              child: Row(children: [
+                const Icon(Icons.calendar_today_rounded, color: Color(0xFF1A73E8), size: 20),
+                const SizedBox(width: 10),
+                Expanded(child: Text(_travelDate == null ? 'Select date & time' : _formatDateTime(_travelDate!),
+                    style: TextStyle(color: _travelDate == null ? ts : tp, fontSize: 14, fontWeight: FontWeight.w500))),
+                Icon(Icons.chevron_right_rounded, color: ts, size: 20),
+              ]),
+            ),
+          ),
+          const SizedBox(height: 16),
 
-          // Time picker
-          _label('Time', ts),
-          GestureDetector(
-              onTap: () async {
-                final t = await showTimePicker(context: context, initialTime: _time);
-                if (t != null) setState(() => _time = t);
-              },
-              child: Container(padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(color: card, borderRadius: BorderRadius.circular(12), border: Border.all(color: border)),
-                  child: Row(children: [
-                    const Icon(Icons.access_time_rounded, color: Color(0xFF1A73E8), size: 20),
-                    const SizedBox(width: 10),
-                    Text(_time.format(context), style: TextStyle(color: tp, fontSize: 14)),
-                    const Spacer(),
-                    Icon(Icons.chevron_right_rounded, color: ts),
-                  ]))),
-          const SizedBox(height: 20),
-
-          _section('Vehicle Type', tp),
-          // Spec: SUV 🚙, Sedan 🚗, Van 🚐 icons
-          GridView.count(shrinkWrap: true, physics: const NeverScrollableScrollPhysics(),
-              crossAxisCount: 3, mainAxisSpacing: 10, crossAxisSpacing: 10, childAspectRatio: 1.6,
-              children: _vehicles.map((v) {
-                final sel = _vehicleType == v['name'];
-                return GestureDetector(
-                    onTap: () => setState(() => _vehicleType = v['name'] as String),
-                    child: AnimatedContainer(duration: const Duration(milliseconds: 200),
-                        decoration: BoxDecoration(
-                            color: sel ? const Color(0xFF1A73E8) : card,
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: sel ? const Color(0xFF1A73E8) : border, width: sel ? 2 : 1)),
-                        child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-                          Icon(v['icon'] as IconData, color: sel ? Colors.white : const Color(0xFF1A73E8), size: 24),
-                          const SizedBox(height: 4),
-                          Text(v['name'] as String, style: TextStyle(color: sel ? Colors.white : tp, fontSize: 11, fontWeight: sel ? FontWeight.bold : FontWeight.normal)),
-                        ])));
-              }).toList()),
-          const SizedBox(height: 20),
-
-          _section('Seats & Fare', tp),
-          Row(children: [
-            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              _label('Available Seats', ts),
-              Container(padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                  decoration: BoxDecoration(color: card, borderRadius: BorderRadius.circular(12), border: Border.all(color: border)),
-                  child: Row(children: [
-                    IconButton(icon: Icon(Icons.remove_rounded, size: 18, color: appIconColor(Icons.remove_rounded)), color: const Color(0xFF1A73E8),
-                        onPressed: () => setState(() => _seats = (_seats - 1).clamp(1, 10))),
-                    Expanded(child: Text('$_seats', textAlign: TextAlign.center,
-                        style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: tp))),
-                    IconButton(icon: Icon(Icons.add_rounded, size: 18, color: appIconColor(Icons.add_rounded)), color: const Color(0xFF1A73E8),
-                        onPressed: () => setState(() => _seats = (_seats + 1).clamp(1, 10))),
-                  ])),
-            ])),
-            const SizedBox(width: 12),
-            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              _label('Fare per seat (₹)', ts),
-              TextFormField(
-                initialValue: _farePerSeat.toStringAsFixed(0),
-                keyboardType: TextInputType.number,
-                style: TextStyle(color: tp, fontSize: 14),
-                decoration: _deco('₹ Amount', Icons.currency_rupee_rounded, const Color(0xFF22C55E), card, border),
-                onChanged: (v) => _farePerSeat = double.tryParse(v) ?? 250,
+          // Passenger type
+          Text('Passenger Type', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: tp)),
+          const SizedBox(height: 10),
+          Wrap(spacing: 8, runSpacing: 8, children: AppStrings.passengerTypes.map((type) {
+            final selected = _passengerType == type;
+            return GestureDetector(
+              onTap: () => setState(() => _passengerType = type),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                decoration: BoxDecoration(
+                    color: selected ? const Color(0xFF1A73E8) : card,
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: selected ? const Color(0xFF1A73E8) : border)),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  Icon(Helpers.getPassengerIcon(type), size: 15, color: selected ? Colors.white : ts),
+                  const SizedBox(width: 6),
+                  Text(type, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: selected ? Colors.white : tp)),
+                ]),
               ),
-            ])),
-          ]),
+            );
+          }).toList()),
+          const SizedBox(height: 16),
+
+          // Vehicle type
+          Text('Vehicle Type', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: tp)),
+          const SizedBox(height: 10),
+          Wrap(spacing: 8, runSpacing: 8, children: AppStrings.vehicleTypes.map((type) {
+            final selected = _vehicleType == type;
+            return GestureDetector(
+              onTap: () => setState(() {
+                _vehicleType = type;
+                // Clamp current seat count down if it no longer fits the
+                // newly selected vehicle's max capacity.
+                final max = maxSeatsForVehicle(type);
+                if (_seats > max) _seats = max;
+              }),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                decoration: BoxDecoration(
+                    color: selected ? const Color(0xFF1A73E8) : card,
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: selected ? const Color(0xFF1A73E8) : border)),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  Icon(Helpers.getVehicleIcon(type), size: 15, color: selected ? Colors.white : ts),
+                  const SizedBox(width: 6),
+                  Text(type, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: selected ? Colors.white : tp)),
+                ]),
+              ),
+            );
+          }).toList()),
+          const SizedBox(height: 16),
+
+          // Available seats — starts at 0, and +/- adjust it live, always
+          // clamped between 0 and the current vehicle's max capacity.
+          Text('Available Seats', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: tp)),
+          const SizedBox(height: 10),
+          Builder(builder: (_) {
+            final maxSeats = maxSeatsForVehicle(_vehicleType);
+            return Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              decoration: BoxDecoration(color: card, borderRadius: BorderRadius.circular(12), border: Border.all(color: border)),
+              child: Row(children: [
+                Expanded(
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text('$_seats seat${_seats == 1 ? '' : 's'}', style: TextStyle(color: tp, fontSize: 16, fontWeight: FontWeight.bold)),
+                    Text('Max $maxSeats for $_vehicleType', style: TextStyle(color: ts, fontSize: 11)),
+                  ]),
+                ),
+                _SeatStepButton(
+                  icon: Icons.remove_rounded,
+                  enabled: _seats > 0,
+                  onTap: () => setState(() => _seats = (_seats - 1).clamp(0, maxSeats)),
+                  tp: tp, border: border, card: card,
+                ),
+                const SizedBox(width: 12),
+                _SeatStepButton(
+                  icon: Icons.add_rounded,
+                  enabled: _seats < maxSeats,
+                  onTap: () => setState(() => _seats = (_seats + 1).clamp(0, maxSeats)),
+                  tp: tp, border: border, card: card,
+                ),
+              ]),
+            );
+          }),
           const SizedBox(height: 28),
 
-          // Verified Driver badge (spec requirement)
-          Container(padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(color: const Color(0xFF22C55E).withValues(alpha: 0.08),
-                  borderRadius: BorderRadius.circular(12), border: Border.all(color: const Color(0xFF22C55E).withValues(alpha: 0.2))),
-              child: Row(children: [
-                const Icon(Icons.verified_rounded, color: Color(0xFF22C55E), size: 20),
-                const SizedBox(width: 8),
-                Expanded(child: Text('Verified Driver — trips are safe & trusted',
-                    style: TextStyle(fontSize: 12, color: ts))),
-              ])),
-          const SizedBox(height: 20),
-
-          // Continue button (spec shows "Continue")
-          SizedBox(width: double.infinity, height: 52,
+          // Create button
+          SizedBox(width: double.infinity, height: 50,
               child: ElevatedButton(
-                  onPressed: _isLoading ? null : _submit,
+                  onPressed: _isCreating ? null : _create,
                   style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF1A73E8), foregroundColor: Colors.white,
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)), elevation: 0),
-                  child: _isLoading
-                      ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2.5))
-                      : const Text('Continue', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)))),
+                  child: _isCreating
+                      ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                      : const Text('Create Trip', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600)))),
           const SizedBox(height: 20),
-        ])),
+        ]),
       ),
     );
   }
+}
 
-  Widget _section(String title, Color tp) => Padding(
-      padding: const EdgeInsets.only(bottom: 10),
-      child: Text(title, style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: tp)));
+// Round +/- button used by the Available Seats counter. Disabled state
+// (greyed out, no tap) when the count is already at its min/max bound.
+class _SeatStepButton extends StatelessWidget {
+  final IconData icon;
+  final bool enabled;
+  final VoidCallback onTap;
+  final Color tp, border, card;
+  const _SeatStepButton({required this.icon, required this.enabled, required this.onTap, required this.tp, required this.border, required this.card});
 
-  Widget _label(String text, Color ts) => Padding(
-      padding: const EdgeInsets.only(bottom: 6),
-      child: Text(text, style: TextStyle(fontSize: 12, color: ts, fontWeight: FontWeight.w500)));
-
-  InputDecoration _deco(String hint, IconData icon, Color iconColor, Color card, Color border) => InputDecoration(
-      hintText: hint, prefixIcon: Icon(icon, color: iconColor, size: 18),
-      filled: true, fillColor: card,
-      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: border)),
-      enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: border)),
-      focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Color(0xFF1A73E8), width: 2)),
-      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14));
-
-  String _monthName(int m) => ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][m-1];
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: enabled ? onTap : null,
+      child: Container(
+        width: 36, height: 36,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: enabled ? const Color(0xFF1A73E8) : card,
+          shape: BoxShape.circle,
+          border: Border.all(color: enabled ? const Color(0xFF1A73E8) : border),
+        ),
+        child: Icon(icon, size: 18, color: enabled ? Colors.white : border),
+      ),
+    );
+  }
 }

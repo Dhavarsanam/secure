@@ -2,7 +2,7 @@ import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:mailer/mailer.dart';
 import 'package:mailer/smtp_server/gmail.dart';
-
+import 'package:url_launcher/url_launcher.dart';
 
 import 'location_service.dart';
 
@@ -90,9 +90,54 @@ class SosService {
         senderPhone: senderPhone,
       );
 
-      return {'success': true, 'alertId': doc.id};
+      return {
+        'success': true,
+        'alertId': doc.id,
+        'lat': position.latitude,
+        'lng': position.longitude,
+        'address': address,
+      };
     } catch (e) {
       return {'success': false, 'error': e.toString()};
+    }
+  }
+
+  // Opens the device's SMS app with a pre-filled emergency message
+  // addressed to every given phone number. This needs no Gmail/SMTP setup
+  // and works the same on Android and iOS — the user just has to tap Send
+  // once the app opens (neither platform allows a normal app to send SMS
+  // silently without the message app in between).
+  Future<bool> shareSosViaSms({
+    required List<String> phoneNumbers,
+    required String senderName,
+    required String senderPhone,
+    required double lat,
+    required double lng,
+    String? address,
+    String? tripCode,
+    String? startLocation,
+    String? destination,
+  }) async {
+    // Clean + dedupe: keep only digits and a leading +, drop empties/dupes.
+    final cleaned = <String>{};
+    for (final raw in phoneNumbers) {
+      final digits = raw.replaceAll(RegExp(r'[^\d+]'), '');
+      if (digits.length >= 6) cleaned.add(digits);
+    }
+    if (cleaned.isEmpty) return false;
+
+    final mapsUrl = 'https://www.google.com/maps/search/?api=1&query=$lat,$lng';
+    final tripLine = tripCode != null ? ' Trip: $tripCode (${startLocation ?? '?'} -> ${destination ?? '?'}).' : '';
+    final body = '🚨 EMERGENCY! $senderName needs help.'
+        ' Location: ${address ?? '$lat,$lng'}.'
+        ' Map: $mapsUrl'
+        ' Contact: $senderPhone.$tripLine';
+
+    final uri = Uri(scheme: 'sms', path: cleaned.join(','), queryParameters: {'body': body});
+    try {
+      return await launchUrl(uri);
+    } catch (e) {
+      return false;
     }
   }
 

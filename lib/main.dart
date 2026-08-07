@@ -1,12 +1,27 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'firebase_options.dart';
 import 'providers/auth_provider.dart';
 import 'providers/trip_provider.dart';
 import 'providers/location_provider.dart';
 import 'providers/theme_provider.dart';
+import 'providers/notification_settings_provider.dart';
+import 'providers/notifications_provider.dart';
 import 'screens/splash/splash_screen.dart';
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  try {
+    await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+  } catch (e) {
+    // If firebase_options.dart still has placeholder keys (FlutterFire CLI
+    // not yet run for this project), Firebase.initializeApp() throws here
+    // instead of crashing later, mid-render, with an opaque JS interop
+    // error. The app still launches — screens that touch Firestore/Auth
+    // will show their own "couldn't connect" states.
+    debugPrint('Firebase.initializeApp() failed: $e');
+  }
   runApp(const MyApp());
 }
 
@@ -16,7 +31,7 @@ class MyApp extends StatelessWidget {
   // Brand accent used in both themes.
   static const Color _accent = Color(0xFF1A73E8);
 
-  // ---- LIGHT THEME (only when user switches to it) ------
+  // ---- LIGHT THEME (only when user switches to it) ----
   ThemeData _lightTheme() {
     return ThemeData(
       colorScheme: ColorScheme.fromSeed(
@@ -92,6 +107,8 @@ class MyApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => AuthProvider()),
         ChangeNotifierProvider(create: (_) => TripProvider()),
         ChangeNotifierProvider(create: (_) => LocationProvider()),
+        ChangeNotifierProvider(create: (_) => NotificationSettingsProvider()),
+        ChangeNotifierProvider(create: (_) => NotificationsProvider()),
       ],
       child: Consumer<ThemeProvider>(
         builder: (context, themeProvider, child) {

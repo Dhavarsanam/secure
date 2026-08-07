@@ -1,5 +1,8 @@
 plugins {
     id("com.android.application")
+    // START: FlutterFire Configuration
+    id("com.google.gms.google-services")
+    // END: FlutterFire Configuration
     id("kotlin-android")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
@@ -8,7 +11,11 @@ plugins {
 android {
     namespace = "com.example.secure_ride"
     compileSdk = flutter.compileSdkVersion
-    ndkVersion = flutter.ndkVersion
+    // Pinned instead of flutter.ndkVersion (Flutter's bundled default) —
+    // recent firebase_core/firebase_auth/cloud_firestore Android plugins
+    // require this specific NDK version and fail the build otherwise with
+    // a version-mismatch error during Gradle configuration.
+    ndkVersion = "27.0.12077973"
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17

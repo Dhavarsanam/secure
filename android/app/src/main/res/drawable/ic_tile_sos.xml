@@ -1,0 +1,14 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24"
+    android:tint="#FFFFFF">
+    <!--
+        Quick Settings tile icons must be a single-color, alpha-only
+        vector (system tints it). Simple triangular alert / SOS glyph.
+    -->
+    <path
+        android:fillColor="#FF000000"
+        android:pathData="M12,2 L23,21 L1,21 Z M12,8.5 C11.45,8.5 11,8.95 11,9.5 L11,14 C11,14.55 11.45,15 12,15 C12.55,15 13,14.55 13,14 L13,9.5 C13,8.95 12.55,8.5 12,8.5 Z M12,16.25 C11.45,16.25 11,16.7 11,17.25 C11,17.8 11.45,18.25 12,18.25 C12.55,18.25 13,17.8 13,17.25 C13,16.7 12.55,16.25 12,16.25 Z" />
+</vector>

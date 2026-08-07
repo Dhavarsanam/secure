@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "1069568778365",
+    "project_id": "ride-4f466",
+    "storage_bucket": "ride-4f466.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1069568778365:android:fcee0ee2d340dac0b71114",
+        "android_client_info": {
+          "package_name": "com.example.secure_ride"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAKeXlnzjZe1i4FRkG73OKkll2SepufxNU"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

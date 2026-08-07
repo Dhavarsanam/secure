@@ -5,7 +5,6 @@ import '../../models/trip_model.dart';
 import '../../providers/trip_provider.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/theme_provider.dart';
-import 'otp_verification_screen.dart';
 import 'rating_review_screen.dart';
 import 'user_profile_screen.dart';
 import '../../utils/app_icon_colors.dart';
@@ -147,44 +146,6 @@ class TripDetailScreen extends StatelessWidget {
               ]),
             )),
           ])),
-
-          // OTP Section
-          if (trip.status == TripStatus.active) ...[
-            const SizedBox(height: 16),
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: const Color(0xFF1A73E8).withValues(alpha: 0.05),
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: const Color(0xFF1A73E8).withValues(alpha: 0.2)),
-              ),
-              child: Column(children: [
-                Row(children: [
-                  const Icon(Icons.verified_user, color: Color(0xFF1A73E8), size: 20),
-                  const SizedBox(width: 8),
-                  Text('Ride OTP Verification', style: TextStyle(fontWeight: FontWeight.bold, color: tp, fontSize: 15)),
-                ]),
-                const SizedBox(height: 8),
-                Text(isCreator ? 'Verify the passenger\'s OTP to start the ride.' : 'Use your OTP to verify with the driver.',
-                    style: TextStyle(fontSize: 12, color: ts, height: 1.4)),
-                const SizedBox(height: 12),
-                SizedBox(
-                  width: double.infinity, height: 48,
-                  child: ElevatedButton.icon(
-                    onPressed: () => Navigator.push(context, MaterialPageRoute(
-                        builder: (_) => OtpVerificationScreen(tripCode: trip.tripCode, tripId: trip.tripId, isDriver: isCreator))),
-                    icon: Icon(Icons.lock_open_outlined, color: appIconColor(Icons.lock_open_outlined)),
-                    label: Text(isCreator ? 'Enter Passenger OTP' : 'Get My OTP'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF1A73E8), foregroundColor: Colors.white,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                      textStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
-                    ),
-                  ),
-                ),
-              ]),
-            ),
-          ],
 
           // Complete/Cancel buttons
           if (trip.status == TripStatus.active && isCreator) ...[

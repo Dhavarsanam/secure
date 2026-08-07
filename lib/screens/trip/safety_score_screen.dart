@@ -7,25 +7,32 @@ import '../../providers/theme_provider.dart';
 class SafetyScore {
   final double overall;
   final double tripCompletion;
-  final double otpVerification;
+  final double tripReliability;
   final double locationSharing;
-  final double communityRating;
-  final double sosUsage;
+  final double trustedContacts;
+  final double emergencyReadiness; // was sosUsage — now based on real SOS setup, not usage
   final int totalTrips;
   final int completedTrips;
-  final int verifiedOtps;
+  final int cancelledTrips;
 
   SafetyScore({
     required this.overall,
     required this.tripCompletion,
-    required this.otpVerification,
+    required this.tripReliability,
     required this.locationSharing,
-    required this.communityRating,
-    required this.sosUsage,
+    required this.trustedContacts,
+    required this.emergencyReadiness,
     required this.totalTrips,
     required this.completedTrips,
-    required this.verifiedOtps,
+    required this.cancelledTrips,
   });
+
+  // True until the user creates/joins their first trip — used to show a
+  // friendly "get started" message instead of a misleading score. Setting
+  // up contacts or location sharing alone doesn't count as "activity" for
+  // this screen: nothing here is presented as a real score until there's
+  // at least one trip.
+  bool get hasNoActivity => totalTrips == 0;
 
   String get grade {
     if (overall >= 90) return 'A+';
@@ -37,6 +44,7 @@ class SafetyScore {
   }
 
   String get label {
+    if (hasNoActivity) return 'Not Enough Data';
     if (overall >= 90) return 'Excellent';
     if (overall >= 80) return 'Very Good';
     if (overall >= 70) return 'Good';
@@ -45,10 +53,71 @@ class SafetyScore {
   }
 
   Color get color {
+    if (hasNoActivity) return const Color(0xFF94A3B8);
     if (overall >= 90) return const Color(0xFF22C55E);
     if (overall >= 70) return const Color(0xFF1A73E8);
     if (overall >= 50) return const Color(0xFFF59E0B);
     return const Color(0xFFEF4444);
+  }
+
+  // Shared calculation — used by both the Home dashboard card AND this
+  // detail screen, so the number shown in both places always matches.
+  //
+  // Every factor starts at 0 for a brand-new user. Nothing is pre-filled —
+  // each factor only rises when the user performs the matching real action:
+  //   Trip Completion   (25%) — completed / total trips
+  //   Trip Reliability  (20%) — 100 - cancellation rate
+  //   Location Sharing  (20%) — 100 only while live location sharing is on
+  //   Trusted Contacts  (25%) — scales with approved contacts (5+ = 100)
+  //   Emergency Readiness (10%) — 50 for having a trusted contact + 50 for
+  //                               location sharing on (the two real
+  //                               prerequisites for SOS to actually work)
+  static SafetyScore calculate(TripProvider trips, AuthProvider auth) {
+    final total = trips.myTrips.length;
+    final completed = trips.completedTrips.length;
+    final cancelled = trips.cancelledTrips.length;
+    final contacts = auth.currentUser?.emergencyContacts.length ?? 0;
+    final locationOn = auth.currentUser?.isLocationSharing ?? false;
+
+    final tripScore = total == 0 ? 0.0 : (completed / total * 100).clamp(0.0, 100.0);
+
+    final reliabilityScore = total == 0 ? 0.0 : (100.0 - (cancelled / total * 100)).clamp(0.0, 100.0);
+
+    final locationScore = locationOn ? 100.0 : 0.0;
+
+    final contactsScore = (contacts * 20.0).clamp(0.0, 100.0);
+
+    final readinessScore = (contacts > 0 ? 50.0 : 0.0) + (locationOn ? 50.0 : 0.0);
+
+    // Trip Completion (25%) and Trip Reliability (20%) only mean something
+    // once the user has actually taken a trip. Scoring them as a flat 0 for
+    // someone who simply hasn't traveled yet unfairly drags their overall
+    // score down for something outside their control. Once there's at
+    // least one trip, use the full weighted formula as before; until then,
+    // drop those two factors out and redistribute their 45% weight across
+    // Location Sharing, Trusted Contacts, and Emergency Readiness — so the
+    // percentage genuinely reflects what the user HAS set up so far.
+    final double overall;
+    if (total > 0) {
+      overall = (tripScore * 0.25 + reliabilityScore * 0.20 + locationScore * 0.20 + contactsScore * 0.25 + readinessScore * 0.10)
+          .clamp(0.0, 100.0);
+    } else {
+      const remainingWeight = 0.20 + 0.25 + 0.10; // 0.55
+      overall = (locationScore * (0.20 / remainingWeight) + contactsScore * (0.25 / remainingWeight) + readinessScore * (0.10 / remainingWeight))
+          .clamp(0.0, 100.0);
+    }
+
+    return SafetyScore(
+      overall: overall,
+      tripCompletion: tripScore,
+      tripReliability: reliabilityScore,
+      locationSharing: locationScore,
+      trustedContacts: contactsScore,
+      emergencyReadiness: readinessScore,
+      totalTrips: total,
+      completedTrips: completed,
+      cancelledTrips: cancelled,
+    );
   }
 }
 
@@ -78,31 +147,8 @@ class _SafetyScoreScreenState extends State<SafetyScoreScreen>
   @override
   void dispose() { _animController.dispose(); super.dispose(); }
 
-  SafetyScore _calculateScore(TripProvider trips, AuthProvider auth) {
-    final total = trips.myTrips.length;
-    final completed = trips.completedTrips.length;
-    final contacts = auth.currentUser?.approvedContacts.length ?? 0;
-
-    final tripScore = total == 0 ? 60.0 : (completed / total * 100).clamp(0.0, 100.0);
-    final otpScore = total > 0 ? 85.0 : 60.0; // dummy
-    final locationScore = contacts > 0 ? 90.0 : 50.0;
-    final ratingScore = 88.0; // dummy avg rating * 20
-    final sosScore = 95.0; // no false alarms
-
-    final overall = (tripScore * 0.25 + otpScore * 0.20 + locationScore * 0.20 + ratingScore * 0.25 + sosScore * 0.10).clamp(0.0, 100.0);
-
-    return SafetyScore(
-      overall: overall,
-      tripCompletion: tripScore,
-      otpVerification: otpScore,
-      locationSharing: locationScore,
-      communityRating: ratingScore,
-      sosUsage: sosScore,
-      totalTrips: total,
-      completedTrips: completed,
-      verifiedOtps: total > 0 ? (total * 0.85).round() : 0,
-    );
-  }
+  SafetyScore _calculateScore(TripProvider trips, AuthProvider auth) =>
+      SafetyScore.calculate(trips, auth);
 
   @override
   Widget build(BuildContext context) {
@@ -146,7 +192,9 @@ class _SafetyScoreScreenState extends State<SafetyScoreScreen>
               ]),
               const SizedBox(height: 16),
 
-              // Animated score circle
+              // Animated score circle — until the first trip, we show
+              // "Not Enough Data" instead of a number so nothing here
+              // reads as a real (and misleadingly positive) score.
               AnimatedBuilder(
                 animation: _scoreAnimation,
                 builder: (_, __) {
@@ -155,14 +203,21 @@ class _SafetyScoreScreenState extends State<SafetyScoreScreen>
                     SizedBox(
                       width: 160, height: 160,
                       child: CircularProgressIndicator(
-                        value: score.overall / 100 * _scoreAnimation.value,
+                        value: score.hasNoActivity ? 0 : score.overall / 100 * _scoreAnimation.value,
                         strokeWidth: 12,
                         backgroundColor: Colors.white.withValues(alpha: 0.2),
                         valueColor: const AlwaysStoppedAnimation(Colors.white),
                         strokeCap: StrokeCap.round,
                       ),
                     ),
-                    Column(mainAxisSize: MainAxisSize.min, children: [
+                    score.hasNoActivity
+                        ? const Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 12),
+                      child: Text('Not Enough Data',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white)),
+                    )
+                        : Column(mainAxisSize: MainAxisSize.min, children: [
                       Text('$displayScore', style: const TextStyle(fontSize: 52, fontWeight: FontWeight.bold, color: Colors.white)),
                       const Text('/100', style: TextStyle(color: Colors.white70, fontSize: 14)),
                     ]),
@@ -175,9 +230,12 @@ class _SafetyScoreScreenState extends State<SafetyScoreScreen>
                 padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
                 decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.2), borderRadius: BorderRadius.circular(20)),
                 child: Row(mainAxisSize: MainAxisSize.min, children: [
-                  Text(score.grade, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white)),
-                  const SizedBox(width: 8),
-                  Text('· ${score.label}', style: const TextStyle(color: Colors.white, fontSize: 14)),
+                  if (!score.hasNoActivity) ...[
+                    Text(score.grade, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white)),
+                    const SizedBox(width: 8),
+                    Text('· ${score.label}', style: const TextStyle(color: Colors.white, fontSize: 14)),
+                  ] else
+                    Text(score.label, style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold)),
                 ]),
               ),
 
@@ -185,12 +243,36 @@ class _SafetyScoreScreenState extends State<SafetyScoreScreen>
               Row(mainAxisAlignment: MainAxisAlignment.spaceAround, children: [
                 _ScoreStat(label: 'Trips', value: '${score.totalTrips}', icon: Icons.directions_car),
                 _ScoreStat(label: 'Completed', value: '${score.completedTrips}', icon: Icons.check_circle_outline),
-                _ScoreStat(label: 'OTP Verified', value: '${score.verifiedOtps}', icon: Icons.verified_user_outlined),
+                _ScoreStat(label: 'Cancelled', value: '${score.cancelledTrips}', icon: Icons.cancel_outlined),
               ]),
             ]),
           ),
 
           const SizedBox(height: 24),
+
+          // Friendly empty-state — shown until the user has done anything
+          if (score.hasNoActivity)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(18),
+              margin: const EdgeInsets.only(bottom: 24),
+              decoration: BoxDecoration(
+                color: const Color(0xFF1A73E8).withValues(alpha: 0.06),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: const Color(0xFF1A73E8).withValues(alpha: 0.2)),
+              ),
+              child: Column(children: [
+                const Text('🚗', style: TextStyle(fontSize: 28)),
+                const SizedBox(height: 8),
+                Text('Start your first trip to build your Safety Score.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(fontWeight: FontWeight.bold, color: tp, fontSize: 14)),
+                const SizedBox(height: 4),
+                Text('Your score grows as you complete trips, share your location, and add trusted contacts.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: ts, fontSize: 12, height: 1.4)),
+              ]),
+            ),
 
           // Score Breakdown
           Container(
@@ -209,10 +291,10 @@ class _SafetyScoreScreenState extends State<SafetyScoreScreen>
               ]),
               const SizedBox(height: 16),
               _ScoreBar(label: 'Trip Completion', score: score.tripCompletion, icon: Icons.directions_car_rounded, color: const Color(0xFF1A73E8), tp: tp, ts: ts, detail: _showDetails ? '${score.completedTrips}/${score.totalTrips} trips completed' : null),
-              _ScoreBar(label: 'OTP Verification', score: score.otpVerification, icon: Icons.verified_user_rounded, color: const Color(0xFF22C55E), tp: tp, ts: ts, detail: _showDetails ? '${score.verifiedOtps} OTPs verified' : null),
-              _ScoreBar(label: 'Location Sharing', score: score.locationSharing, icon: Icons.location_on_rounded, color: const Color(0xFF8B5CF6), tp: tp, ts: ts, detail: _showDetails ? '${auth.currentUser?.approvedContacts.length ?? 0} trusted contacts' : null),
-              _ScoreBar(label: 'Community Rating', score: score.communityRating, icon: Icons.star_rounded, color: const Color(0xFFF59E0B), tp: tp, ts: ts, detail: _showDetails ? '4.4/5.0 average rating' : null),
-              _ScoreBar(label: 'SOS Discipline', score: score.sosUsage, icon: Icons.sos_rounded, color: const Color(0xFFEF4444), tp: tp, ts: ts, detail: _showDetails ? 'No false SOS alerts' : null, isLast: true),
+              _ScoreBar(label: 'Trip Reliability', score: score.tripReliability, icon: Icons.cancel_outlined, color: const Color(0xFF22C55E), tp: tp, ts: ts, notEnoughData: score.hasNoActivity, detail: _showDetails ? (score.hasNoActivity ? 'Not enough data yet' : '${score.cancelledTrips}/${score.totalTrips} trips cancelled') : null),
+              _ScoreBar(label: 'Location Sharing', score: score.locationSharing, icon: Icons.location_on_rounded, color: const Color(0xFF8B5CF6), tp: tp, ts: ts, notEnoughData: score.hasNoActivity, detail: _showDetails ? (score.hasNoActivity ? 'Not enough data yet' : (auth.currentUser?.isLocationSharing == true ? 'Location sharing is on' : 'Location sharing is off')) : null),
+              _ScoreBar(label: 'Trusted Contacts', score: score.trustedContacts, icon: Icons.group_rounded, color: const Color(0xFFF59E0B), tp: tp, ts: ts, notEnoughData: score.hasNoActivity, detail: _showDetails ? (score.hasNoActivity ? 'Not enough data yet' : '${auth.currentUser?.emergencyContacts.length ?? 0} trusted contacts added') : null),
+              _ScoreBar(label: 'Emergency Readiness', score: score.emergencyReadiness, icon: Icons.sos_rounded, color: const Color(0xFFEF4444), tp: tp, ts: ts, notEnoughData: score.hasNoActivity, detail: _showDetails ? (score.hasNoActivity ? 'Not enough data yet' : score.emergencyReadiness == 0 ? 'Add a contact and enable location sharing to set up SOS' : score.emergencyReadiness < 100 ? 'Partially set up — complete both steps below' : 'SOS fully configured') : null, isLast: true),
             ]),
           ),
 
@@ -245,21 +327,21 @@ class _SafetyScoreScreenState extends State<SafetyScoreScreen>
 
           const SizedBox(height: 20),
 
-          // Score History (dummy)
+          // Score Snapshot — a real month-by-month history isn't tracked
+          // in this project, so we show today's true breakdown instead of
+          // fabricated past months.
           Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(color: card, borderRadius: BorderRadius.circular(16),
                 boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 8)]),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text('Score History', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: tp)),
-              const SizedBox(height: 16),
-              Row(mainAxisAlignment: MainAxisAlignment.spaceAround, children: [
-                _HistoryBar(month: 'Feb', score: 65, maxScore: 100, color: const Color(0xFFF59E0B), tp: tp, ts: ts),
-                _HistoryBar(month: 'Mar', score: 72, maxScore: 100, color: const Color(0xFF1A73E8), tp: tp, ts: ts),
-                _HistoryBar(month: 'Apr', score: 78, maxScore: 100, color: const Color(0xFF1A73E8), tp: tp, ts: ts),
-                _HistoryBar(month: 'May', score: 82, maxScore: 100, color: const Color(0xFF22C55E), tp: tp, ts: ts),
-                _HistoryBar(month: 'Jun', score: score.overall.round(), maxScore: 100, color: score.color, tp: tp, ts: ts, isCurrent: true),
-              ]),
+            child: Row(children: [
+              Icon(Icons.info_outline_rounded, color: ts, size: 18),
+              const SizedBox(width: 10),
+              Expanded(child: Text(
+                  score.hasNoActivity
+                      ? 'Score history will start building once you begin using the app.'
+                      : 'This score reflects your current activity as of today. Keep completing trips and maintaining your trusted network to improve it.',
+                  style: TextStyle(fontSize: 12, color: ts, height: 1.4))),
             ]),
           ),
 
@@ -271,11 +353,12 @@ class _SafetyScoreScreenState extends State<SafetyScoreScreen>
 
   List<String> _getTips(SafetyScore score, AuthProvider auth) {
     final tips = <String>[];
-    if (score.tripCompletion < 80) tips.add('Complete more trips without cancelling to boost your trip score.');
-    if (auth.currentUser?.approvedContacts.isEmpty == true) tips.add('Add trusted contacts and share your location during trips.');
-    if (score.otpVerification < 80) tips.add('Always verify OTP before starting rides for better security.');
-    if (score.communityRating < 85) tips.add('Be punctual and friendly to get better ratings from passengers.');
-    if (tips.isEmpty) tips.add('Great job! Keep completing trips and maintaining good ratings to stay on top!');
+    if (score.totalTrips == 0) tips.add('Create or join your first trip to start building your Trip Completion and Reliability scores.');
+    if (score.totalTrips > 0 && score.tripReliability < 80) tips.add('Avoid cancelling trips after creating or joining them to improve reliability.');
+    if (auth.currentUser?.isLocationSharing != true) tips.add('Turn on location sharing so you get credit for it during trips.');
+    if (score.trustedContacts < 100) tips.add('Add more trusted contacts (up to 5) so they can be notified in an emergency.');
+    if (score.emergencyReadiness < 100) tips.add('Add a trusted contact and enable location sharing to fully set up SOS.');
+    if (tips.isEmpty) tips.add('Great job! Keep completing trips and maintaining your trusted network to stay on top!');
     return tips;
   }
 }
@@ -301,27 +384,34 @@ class _ScoreBar extends StatelessWidget {
   final Color tp, ts;
   final String? detail;
   final bool isLast;
+  // When true, this factor hasn't been earned by real activity yet
+  // (no trips taken), so we show "Not Enough Data" instead of a 0
+  // that could read as a bad score.
+  final bool notEnoughData;
 
-  const _ScoreBar({required this.label, required this.score, required this.icon, required this.color, required this.tp, required this.ts, this.detail, this.isLast = false});
+  const _ScoreBar({required this.label, required this.score, required this.icon, required this.color, required this.tp, required this.ts, this.detail, this.isLast = false, this.notEnoughData = false});
 
   @override
   Widget build(BuildContext context) {
+    final barColor = notEnoughData ? ts.withValues(alpha: 0.5) : color;
     return Padding(
       padding: EdgeInsets.only(bottom: isLast ? 0 : 14),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
-          Icon(icon, color: color, size: 16),
+          Icon(icon, color: barColor, size: 16),
           const SizedBox(width: 8),
           Expanded(child: Text(label, style: TextStyle(color: tp, fontSize: 13, fontWeight: FontWeight.w500))),
-          Text('${score.round()}', style: TextStyle(color: color, fontWeight: FontWeight.bold, fontSize: 13)),
+          notEnoughData
+              ? Text('Not Enough Data', style: TextStyle(color: ts, fontWeight: FontWeight.w600, fontSize: 12))
+              : Text('${score.round()}', style: TextStyle(color: color, fontWeight: FontWeight.bold, fontSize: 13)),
         ]),
         const SizedBox(height: 6),
         ClipRRect(
           borderRadius: BorderRadius.circular(4),
           child: LinearProgressIndicator(
-            value: score / 100,
-            backgroundColor: color.withValues(alpha: 0.1),
-            valueColor: AlwaysStoppedAnimation(color),
+            value: notEnoughData ? 0 : score / 100,
+            backgroundColor: barColor.withValues(alpha: 0.1),
+            valueColor: AlwaysStoppedAnimation(barColor),
             minHeight: 8,
           ),
         ),
@@ -331,35 +421,5 @@ class _ScoreBar extends StatelessWidget {
         ],
       ]),
     );
-  }
-}
-
-class _HistoryBar extends StatelessWidget {
-  final String month;
-  final int score, maxScore;
-  final Color color, tp, ts;
-  final bool isCurrent;
-
-  const _HistoryBar({required this.month, required this.score, required this.maxScore, required this.color, required this.tp, required this.ts, this.isCurrent = false});
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(children: [
-      Text('$score', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: isCurrent ? color : tp)),
-      const SizedBox(height: 4),
-      Container(
-        width: 32,
-        height: 80,
-        decoration: BoxDecoration(color: color.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(6)),
-        alignment: Alignment.bottomCenter,
-        child: FractionallySizedBox(
-          heightFactor: score / maxScore,
-          child: Container(decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(6))),
-        ),
-      ),
-      const SizedBox(height: 4),
-      Text(month, style: TextStyle(fontSize: 10, color: isCurrent ? color : ts, fontWeight: isCurrent ? FontWeight.bold : FontWeight.normal)),
-      if (isCurrent) Container(width: 4, height: 4, decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
-    ]);
   }
 }

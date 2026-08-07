@@ -10,11 +10,11 @@ dependencies:
   flutter:
     sdk: flutter
 
-  # Firebase
-  firebase_core: ^4.11.0
-  firebase_auth: ^6.5.4
-  cloud_firestore: ^6.6.0
-  firebase_storage: ^13.4.3
+  # Firebase (exact versions - do not use ^ here, newer patches 6.5.5/6.7.0 have a known plugin registration bug)
+  firebase_core: 4.11.0
+  firebase_auth: 6.5.4
+  cloud_firestore: 6.6.0
+  firebase_storage: 13.4.3
 
   # State Management
   provider: ^6.1.2
@@ -47,10 +47,12 @@ dependencies:
   shared_preferences: ^2.2.3
   uuid: ^4.4.0
   url_launcher: ^6.2.6
+  flutter_phone_direct_caller: ^2.1.1
   permission_handler: ^12.0.3
   image_picker: ^1.1.1
   flutter_dotenv: ^6.0.1
   connectivity_plus: ^7.1.1
+  share_plus: ^13.2.0
 
 dev_dependencies:
   flutter_test:

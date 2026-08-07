@@ -63,88 +63,116 @@ class _SplashScreenState extends State<SplashScreen> with TickerProviderStateMix
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.transparent,
-      body: Container(
-        width: double.infinity, height: double.infinity,
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            colors: [Color(0xFF0D47A1), Color(0xFF1A73E8), Color(0xFF0EA5E9)],
-            begin: Alignment.topLeft, end: Alignment.bottomRight,
-          ),
-        ),
-        child: Column(children: [
-          const Spacer(flex: 2),
-
-          // 🚗 Car Driving Lottie
-          Lottie.asset(
-            'assets/animations/car_driving.json',
-            width: 220, height: 160,
-            fit: BoxFit.contain,
-            repeat: true,
-            errorBuilder: (_, __, ___) => Stack(alignment: Alignment.center, children: [
-              Container(width: 110, height: 110,
-                  decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(28),
-                      boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.25), blurRadius: 40, offset: const Offset(0, 12))]),
-                  child: Stack(alignment: Alignment.center, children: [
-                    const Icon(Icons.directions_car_filled_rounded, color: Color(0xFF1A73E8), size: 56),
-                    Positioned(bottom: 18, right: 18,
-                        child: Container(width: 22, height: 22,
-                            decoration: const BoxDecoration(color: Color(0xFF22C55E), shape: BoxShape.circle),
-                            child: const Icon(Icons.shield_rounded, color: Colors.white, size: 13))),
-                  ])),
-            ]),
+      backgroundColor: const Color(0xFF0A0E1A),
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          // ---- Background image ----
+          Image.asset(
+            'assets/images/image1.png',
+            fit: BoxFit.cover,
+            alignment: Alignment.bottomCenter,
+            errorBuilder: (_, __, ___) => const DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [Color(0xFF0D47A1), Color(0xFF1A73E8), Color(0xFF0EA5E9)],
+                  begin: Alignment.topLeft, end: Alignment.bottomRight,
+                ),
+              ),
+            ),
           ),
 
-          const SizedBox(height: 20),
+          // ---- Gradient scrim (keeps text/lottie readable) ----
+          DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [
+                  const Color(0xFF060A14).withValues(alpha: 0.35),
+                  const Color(0xFF060A14).withValues(alpha: 0.30),
+                  const Color(0xFF060A14).withValues(alpha: 0.65),
+                ],
+                stops: const [0.0, 0.5, 1.0],
+              ),
+            ),
+          ),
 
-          // App name + tagline
-          SlideTransition(
-            position: _textSlide,
-            child: FadeTransition(
+          // ---- Content ----
+          Column(children: [
+            const Spacer(flex: 2),
+
+            // 🚗 Car Driving Lottie
+            Lottie.asset(
+              'assets/animations/car_driving.json',
+              width: 220, height: 160,
+              fit: BoxFit.contain,
+              repeat: true,
+              errorBuilder: (_, __, ___) => Stack(alignment: Alignment.center, children: [
+                Container(width: 110, height: 110,
+                    decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(28),
+                        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.25), blurRadius: 40, offset: const Offset(0, 12))]),
+                    child: Stack(alignment: Alignment.center, children: [
+                      const Icon(Icons.directions_car_filled_rounded, color: Color(0xFF1A73E8), size: 56),
+                      Positioned(bottom: 18, right: 18,
+                          child: Container(width: 22, height: 22,
+                              decoration: const BoxDecoration(color: Color(0xFF22C55E), shape: BoxShape.circle),
+                              child: const Icon(Icons.shield_rounded, color: Colors.white, size: 13))),
+                    ])),
+              ]),
+            ),
+
+            const SizedBox(height: 20),
+
+            // App name + tagline
+            SlideTransition(
+              position: _textSlide,
+              child: FadeTransition(
+                opacity: _textFade,
+                child: Column(children: [
+                  const Text('SecureRide',
+                      style: TextStyle(fontSize: 40, fontWeight: FontWeight.bold, color: Colors.white,
+                          letterSpacing: 1.0, shadows: [Shadow(color: Colors.black54, blurRadius: 12)])),
+                  const SizedBox(height: 10),
+                  Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 7),
+                      decoration: BoxDecoration(
+                          color: Colors.white.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(20),
+                          border: Border.all(color: Colors.white.withValues(alpha: 0.3))),
+                      child: const Text('Safe. Private. Connected.',
+                          style: TextStyle(color: Colors.white, fontSize: 14, letterSpacing: 0.5))),
+                  const SizedBox(height: 24),
+                  Wrap(spacing: 10, runSpacing: 8, alignment: WrapAlignment.center,
+                      children: const [
+                        _Pill(icon: Icons.verified_user_rounded, label: 'Verified'),
+                        _Pill(icon: Icons.location_on_rounded, label: 'Live Track'),
+                        _Pill(icon: Icons.sos_rounded, label: 'SOS Alert'),
+                      ]),
+                ]),
+              ),
+            ),
+
+            const Spacer(flex: 2),
+
+            // Loading lottie
+            FadeTransition(
               opacity: _textFade,
-              child: Column(children: [
-                const Text('SecureRide',
-                    style: TextStyle(fontSize: 40, fontWeight: FontWeight.bold, color: Colors.white,
-                        letterSpacing: 1.0, shadows: [Shadow(color: Colors.black26, blurRadius: 8)])),
-                const SizedBox(height: 10),
-                Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 7),
-                    decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(20),
-                        border: Border.all(color: Colors.white.withValues(alpha: 0.3))),
-                    child: const Text('Safe. Private. Connected.',
-                        style: TextStyle(color: Colors.white, fontSize: 14, letterSpacing: 0.5))),
-                const SizedBox(height: 24),
-                Wrap(spacing: 10, runSpacing: 8, alignment: WrapAlignment.center,
-                    children: const [
-                      _Pill(icon: Icons.verified_user_rounded, label: 'Verified'),
-                      _Pill(icon: Icons.location_on_rounded, label: 'Live Track'),
-                      _Pill(icon: Icons.sos_rounded, label: 'SOS Alert'),
-                    ]),
-              ]),
+              child: Padding(
+                padding: const EdgeInsets.only(bottom: 40),
+                child: Column(children: [
+                  Lottie.asset('assets/animations/loading.json',
+                      width: 60, height: 60, fit: BoxFit.contain,
+                      errorBuilder: (_, __, ___) => SizedBox(width: 28, height: 28,
+                          child: CircularProgressIndicator(color: Colors.white.withValues(alpha: 0.7), strokeWidth: 2.5))),
+                  const SizedBox(height: 8),
+                  Consumer<AuthProvider>(builder: (_, auth, __) =>
+                      Text(auth.isLoading ? 'Checking session...' : 'Loading...',
+                          style: TextStyle(color: Colors.white.withValues(alpha: 0.7), fontSize: 12))),
+                ]),
+              ),
             ),
-          ),
-
-          const Spacer(flex: 2),
-
-          // Loading lottie
-          FadeTransition(
-            opacity: _textFade,
-            child: Padding(
-              padding: const EdgeInsets.only(bottom: 40),
-              child: Column(children: [
-                Lottie.asset('assets/animations/loading.json',
-                    width: 60, height: 60, fit: BoxFit.contain,
-                    errorBuilder: (_, __, ___) => SizedBox(width: 28, height: 28,
-                        child: CircularProgressIndicator(color: Colors.white.withValues(alpha: 0.7), strokeWidth: 2.5))),
-                const SizedBox(height: 8),
-                Consumer<AuthProvider>(builder: (_, auth, __) =>
-                    Text(auth.isLoading ? 'Checking session...' : 'Loading...',
-                        style: TextStyle(color: Colors.white.withValues(alpha: 0.6), fontSize: 12))),
-              ]),
-            ),
-          ),
-        ]),
+          ]),
+        ],
       ),
     );
   }
