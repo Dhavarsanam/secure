@@ -65,14 +65,10 @@ class _LiveLocationScreenState extends State<LiveLocationScreen> {
         );
         if (ok && mounted) {
           await context.read<AuthProvider>().setLocationSharing(true);
-          // One tap here (turning sharing on) is meant to reach every saved
-          // contact — instead of making the user separately open "Share
-          // via..." and pick a contact each time. sms: supports comma-
-          // separated recipients, so this opens ONE prefilled composer
-          // addressed to all of them at once; the user still has to tap
-          // Send themselves (Android/iOS don't allow apps to send SMS
-          // silently without extra permissions).
-          await _autoShareToContacts();
+          // Turning sharing on used to jump straight to an SMS composer.
+          // Now it asks which channel to use instead, so the user picks
+          // SMS / WhatsApp / Mail themselves before anything opens.
+          await _showShareChannelSheet();
         }
         if (!mounted) return;
         if (!ok) {
@@ -144,25 +140,115 @@ class _LiveLocationScreenState extends State<LiveLocationScreen> {
     ));
   }
 
+  // Builds the same "I'm sharing my live location" message every channel
+  // below sends, so SMS/WhatsApp/Mail always say the same thing.
+  String _shareMessageBody() {
+    final auth = context.read<AuthProvider>().currentUser;
+    final locationProvider = context.read<LocationProvider>();
+    final pos = locationProvider.currentPosition ?? locationProvider.positionOrDefault;
+    final mapsLink = 'https://www.google.com/maps?q=${pos.latitude},${pos.longitude}';
+    final name = auth?.fullName ?? 'I';
+    return "$name'm sharing my live location via SecureRide:\n$mapsLink";
+  }
+
+  // Bottom sheet asking which channel to send the live-location link
+  // through. Shown right after sharing turns on, so the user picks once
+  // up front instead of the app guessing for them.
+  Future<void> _showShareChannelSheet() async {
+    final isDark = context.read<ThemeProvider>().isDarkMode;
+    final card = isDark ? const Color(0xFF1A1A2E) : Colors.white;
+    final tp = isDark ? const Color(0xFFF1F5F9) : const Color(0xFF1A1A2E);
+
+    Widget option(IconData icon, Color color, String label, VoidCallback onTap) {
+      return ListTile(
+        leading: Container(
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(color: color.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(10)),
+          child: Icon(icon, color: color),
+        ),
+        title: Text(label, style: TextStyle(color: tp, fontWeight: FontWeight.w600)),
+        onTap: () {
+          Navigator.pop(context);
+          onTap();
+        },
+      );
+    }
+
+    await showModalBottomSheet(
+      context: context,
+      backgroundColor: card,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (sheetCtx) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          const SizedBox(height: 12),
+          Text('Share location via', style: TextStyle(color: tp, fontWeight: FontWeight.bold, fontSize: 16)),
+          const SizedBox(height: 8),
+          option(Icons.sms_rounded, const Color(0xFF22C55E), 'SMS', _shareViaSms),
+          option(Icons.chat_rounded, const Color(0xFF25D366), 'WhatsApp', _shareViaWhatsApp),
+          option(Icons.email_rounded, const Color(0xFF1A73E8), 'Mail', _shareViaMail),
+          const SizedBox(height: 8),
+        ]),
+      ),
+    );
+  }
+
   // Opens one SMS composer addressed to every saved contact's phone
-  // number, prefilled with the live-location link. Triggered automatically
-  // right after sharing turns on. Silently does nothing if there are no
-  // saved contacts, or if no SMS app is available to handle it (e.g. some
-  // tablets/emulators) — sharing itself has already succeeded by this
-  // point, so this staying quiet on failure is intentional.
-  Future<void> _autoShareToContacts() async {
+  // number, prefilled with the live-location link. Silently does nothing
+  // if there are no saved contacts, or if no SMS app is available to
+  // handle it (e.g. some tablets/emulators) — sharing itself has already
+  // succeeded by this point, so this staying quiet on failure is
+  // intentional.
+  Future<void> _shareViaSms() async {
     final auth = context.read<AuthProvider>().currentUser;
     final contacts = auth?.emergencyContacts ?? [];
     final numbers = contacts.map((c) => c.phone.trim()).where((p) => p.isNotEmpty).join(',');
     if (numbers.isEmpty) return;
 
-    final locationProvider = context.read<LocationProvider>();
-    final pos = locationProvider.currentPosition ?? locationProvider.positionOrDefault;
-    final mapsLink = 'https://www.google.com/maps?q=${pos.latitude},${pos.longitude}';
-    final name = auth?.fullName ?? 'I';
-    final body = "$name'm sharing my live location via SecureRide:\n$mapsLink";
+    final uri = Uri(scheme: 'sms', path: numbers, queryParameters: {'body': _shareMessageBody()});
+    try {
+      if (await canLaunchUrl(uri)) {
+        await launchUrl(uri);
+      }
+    } catch (_) {
+      // See doc comment above — deliberately silent.
+    }
+  }
 
-    final uri = Uri(scheme: 'sms', path: numbers, queryParameters: {'body': body});
+  // Opens WhatsApp with the live-location message prefilled. WhatsApp's
+  // own link scheme only supports one recipient at a time, so this opens
+  // WhatsApp's contact picker instead of guessing which saved contact to
+  // pick — the user then chooses who (or which group) to send it to.
+  Future<void> _shareViaWhatsApp() async {
+    final uri = Uri.parse('https://wa.me/?text=${Uri.encodeComponent(_shareMessageBody())}');
+    try {
+      if (await canLaunchUrl(uri)) {
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
+      } else if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('WhatsApp is not installed on this device.'),
+          backgroundColor: Color(0xFFEF4444),
+          behavior: SnackBarBehavior.floating,
+        ));
+      }
+    } catch (_) {
+      // Deliberately silent — sharing itself has already succeeded.
+    }
+  }
+
+  // Opens a mail composer addressed to every saved contact's email,
+  // prefilled with the live-location link. Silently does nothing if no
+  // saved contact has an email on file.
+  Future<void> _shareViaMail() async {
+    final auth = context.read<AuthProvider>().currentUser;
+    final contacts = auth?.emergencyContacts ?? [];
+    final emails = contacts.map((c) => c.email.trim()).where((e) => e.isNotEmpty).join(',');
+    if (emails.isEmpty) return;
+
+    final uri = Uri(
+      scheme: 'mailto',
+      path: emails,
+      queryParameters: {'subject': 'My Live Location - SecureRide', 'body': _shareMessageBody()},
+    );
     try {
       if (await canLaunchUrl(uri)) {
         await launchUrl(uri);

@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:geolocator/geolocator.dart';
 import 'package:provider/provider.dart';
 import '../../providers/theme_provider.dart';
 import '../../providers/trip_provider.dart';
@@ -25,7 +24,6 @@ class _WeatherScreenState extends State<WeatherScreen> {
   final GeocodingService _geocodingService = GeocodingService();
   final _cityController = TextEditingController();
 
-  Position? _position;
   WeatherData? _weather;
   bool _weatherLoading = true;
   String? _weatherError;
@@ -61,7 +59,6 @@ class _WeatherScreenState extends State<WeatherScreen> {
     if (pos == null) {
       if (mounted) setState(() { _weatherLoading = false; _weatherError = 'Unable to get your current location.'; });
     } else {
-      _position = pos;
       final cityName = await _geocodingService.reverseGeocode(pos.latitude, pos.longitude);
       final weather = await _weatherService.getWeather(lat: pos.latitude, lng: pos.longitude, cityName: cityName);
       if (mounted) {

@@ -25,13 +25,12 @@ const List<Color> _cardAccents = [_blue, Color(0xFF3B82F6), Color(0xFF22D3C9), C
 
 // Dashed curve connecting the two route pins in the header banner.
 class _DashedCurvePainter extends CustomPainter {
-  final Color color;
-  const _DashedCurvePainter({this.color = Colors.white});
+  const _DashedCurvePainter();
 
   @override
   void paint(Canvas canvas, Size size) {
     final paint = Paint()
-      ..color = color.withValues(alpha: 0.75)
+      ..color = Colors.white.withValues(alpha: 0.75)
       ..strokeWidth = 2.2
       ..style = PaintingStyle.stroke
       ..strokeCap = StrokeCap.round;
@@ -51,7 +50,7 @@ class _DashedCurvePainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _DashedCurvePainter oldDelegate) => oldDelegate.color != color;
+  bool shouldRepaint(covariant _DashedCurvePainter oldDelegate) => false;
 }
 
 // Location names stored on a trip can be a full address (e.g. "Fathima
@@ -74,13 +73,13 @@ String districtName(String fullName) {
 }
 
 // Fallback sample routes — the exact places from the reference design
-// (Madurai→Chennai, Coimbatore→Bengaluru, Trichy→Erode, Tirunelveli→Madurai,
-// Salem→Chennai). These only fill in when there aren't 5 real trips in
+// (Bangalore→Chennai, Coimbatore→Trichy, Salem→Hyderabad, Vellore→Pondicherry,
+// Erode→Bengaluru). These only fill in when there aren't 5 real trips in
 // Firestore yet, so the page always looks populated like the approved
 // design. They're clearly marked "Demo route" and can't be joined, since
 // there's no real trip behind them.
 final List<TripModel> _sampleRouteTrips = [
-  ('Madurai', 'Chennai', 'Car', 4, 2),
+  ('Bangalore', 'Chennai', 'Car', 4, 2),
   ('Coimbatore', 'Trichy', 'Van', 5, 3),
   ('Salem', 'Hyderabad', 'SUV', 4, 1),
   ('Vellore', 'Pondicherry', 'Bus', 6, 4),

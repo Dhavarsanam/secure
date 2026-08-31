@@ -1,22 +1,17 @@
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
+import '../../core/services/firestore_service.dart';
+import '../../models/trip_model.dart';
+import '../../models/user_model.dart';
 import '../../providers/theme_provider.dart';
 import '../../utils/app_icon_colors.dart';
+import '../trip/safety_score_screen.dart';
 
-class AdminUser {
-  final String id, name, email, phone, joinDate;
-  final bool isVerified, isBlocked;
-  final int totalTrips;
-  final double safetyScore;
-
-  const AdminUser({
-    required this.id, required this.name, required this.email,
-    required this.phone, required this.joinDate,
-    this.isVerified = false, this.isBlocked = false,
-    this.totalTrips = 0, this.safetyScore = 0.0,
-  });
-}
-
+// Fully dynamic — every user shown here comes live from Firestore's
+// `users` collection (see FirestoreService.allUsersStream). There is no
+// hardcoded/demo user list and no duplicate rows: Firestore document IDs
+// are unique, so each user appears exactly once.
 class AdminUsersScreen extends StatefulWidget {
   const AdminUsersScreen({super.key});
   @override
@@ -25,27 +20,17 @@ class AdminUsersScreen extends StatefulWidget {
 
 class _AdminUsersScreenState extends State<AdminUsersScreen> {
   final _searchCtrl = TextEditingController();
+  final _firestoreService = FirestoreService();
   String _search = '';
   String _filter = 'All';
   final List<String> _filters = ['All', 'Verified', 'Unverified', 'Blocked'];
 
-  final List<AdminUser> _users = const [
-    AdminUser(id: 'u001', name: 'Nisha Fathima', email: 'nisha@fcw.edu', phone: '+91 98765 43210', joinDate: '01 Jan 2026', isVerified: true, totalTrips: 12, safetyScore: 88),
-    AdminUser(id: 'u002', name: 'Priya Sundaram', email: 'priya@example.com', phone: '+91 87654 32109', joinDate: '05 Jan 2026', isVerified: true, totalTrips: 8, safetyScore: 92),
-    AdminUser(id: 'u003', name: 'Ayesha Khan', email: 'ayesha@gmail.com', phone: '+91 76543 21098', joinDate: '10 Jan 2026', isVerified: false, totalTrips: 3, safetyScore: 75),
-    AdminUser(id: 'u004', name: 'Meena Ravi', email: 'meena@yahoo.com', phone: '+91 65432 10987', joinDate: '15 Jan 2026', isVerified: true, totalTrips: 20, safetyScore: 95),
-    AdminUser(id: 'u005', name: 'Kavitha S', email: 'kavitha@fcw.edu', phone: '+91 54321 09876', joinDate: '20 Jan 2026', isVerified: false, totalTrips: 1, safetyScore: 60),
-    AdminUser(id: 'u006', name: 'Riya Menon', email: 'riya@gmail.com', phone: '+91 43210 98765', joinDate: '25 Jan 2026', isVerified: false, isBlocked: true, totalTrips: 0, safetyScore: 0),
-    AdminUser(id: 'u007', name: 'Divya Lakshmi', email: 'divya@fcw.edu', phone: '+91 32109 87654', joinDate: '01 Feb 2026', isVerified: true, totalTrips: 15, safetyScore: 90),
-    AdminUser(id: 'u008', name: 'Saranya K', email: 'saranya@gmail.com', phone: '+91 21098 76543', joinDate: '05 Feb 2026', isVerified: false, totalTrips: 5, safetyScore: 72),
-  ];
-
   @override
   void dispose() { _searchCtrl.dispose(); super.dispose(); }
 
-  List<AdminUser> get _filtered => _users.where((u) {
+  List<UserModel> _applyFilters(List<UserModel> users) => users.where((u) {
     final matchSearch = _search.isEmpty ||
-        u.name.toLowerCase().contains(_search.toLowerCase()) ||
+        u.fullName.toLowerCase().contains(_search.toLowerCase()) ||
         u.email.toLowerCase().contains(_search.toLowerCase());
     final matchFilter = _filter == 'All' ||
         (_filter == 'Verified' && u.isVerified && !u.isBlocked) ||
@@ -53,6 +38,26 @@ class _AdminUsersScreenState extends State<AdminUsersScreen> {
         (_filter == 'Blocked' && u.isBlocked);
     return matchSearch && matchFilter;
   }).toList();
+
+  Future<void> _toggleVerified(UserModel user) async {
+    final ok = await _firestoreService.setUserVerified(user.uid, !user.isVerified);
+    if (!ok && mounted) _showSnack('Could not update verification status', const Color(0xFFEF4444));
+  }
+
+  Future<void> _toggleBlocked(UserModel user) async {
+    final ok = await _firestoreService.setUserBlocked(user.uid, !user.isBlocked);
+    if (!ok && mounted) _showSnack('Could not update block status', const Color(0xFFEF4444));
+  }
+
+  void _showSnack(String msg, Color color) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(msg),
+      backgroundColor: color,
+      behavior: SnackBarBehavior.floating,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      margin: const EdgeInsets.all(16),
+    ));
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -64,104 +69,157 @@ class _AdminUsersScreenState extends State<AdminUsersScreen> {
 
     return Scaffold(
       backgroundColor: bg,
-      appBar: AppBar(
-        backgroundColor: const Color(0xFF7C3AED),
-        foregroundColor: Colors.white,
-        automaticallyImplyLeading: false,
-        title: const Text('User Management', style: TextStyle(fontWeight: FontWeight.bold)),
-        actions: [
-          Container(margin: const EdgeInsets.only(right: 12),
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-              decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.2), borderRadius: BorderRadius.circular(20)),
-              child: Text('${_users.length} users', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold))),
-        ],
-      ),
-      body: Column(children: [
-        Container(color: card, padding: const EdgeInsets.all(12), child: Column(children: [
-          TextField(
-            controller: _searchCtrl,
-            onChanged: (v) => setState(() => _search = v),
-            decoration: InputDecoration(
-              hintText: 'Search by name or email...',
-              hintStyle: TextStyle(color: ts, fontSize: 13),
-              prefixIcon: Icon(Icons.search, color: appIconColor(Icons.search)),
-              suffixIcon: _search.isNotEmpty ? IconButton(icon: Icon(Icons.clear, color: appIconColor(Icons.clear)),
-                  onPressed: () { _searchCtrl.clear(); setState(() => _search = ''); }) : null,
-              filled: true, fillColor: isDark ? const Color(0xFF2A2A3E) : const Color(0xFFF5F7FA),
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
-              contentPadding: const EdgeInsets.symmetric(vertical: 10),
-            ),
-          ),
-          const SizedBox(height: 8),
-          SizedBox(height: 32, child: ListView(scrollDirection: Axis.horizontal,
-              children: _filters.map((f) => Padding(padding: const EdgeInsets.only(right: 8),
-                  child: FilterChip(
-                    label: Text(f, style: TextStyle(fontSize: 12, color: _filter == f ? Colors.white : tp,
-                        fontWeight: _filter == f ? FontWeight.w600 : FontWeight.normal)),
-                    selected: _filter == f,
-                    onSelected: (_) => setState(() => _filter = f),
-                    backgroundColor: isDark ? const Color(0xFF2A2A3E) : const Color(0xFFF5F7FA),
-                    selectedColor: const Color(0xFF7C3AED),
-                    checkmarkColor: Colors.white, side: BorderSide.none,
-                    padding: const EdgeInsets.symmetric(horizontal: 4),
-                  ))).toList())),
-        ])),
+      body: StreamBuilder<List<UserModel>>(
+        stream: _firestoreService.allUsersStream(),
+        builder: (context, snapshot) {
+          if (snapshot.hasError) {
+            return Column(children: [
+              _appBar(0, isDark),
+              Expanded(child: Center(child: Text('Failed to load users', style: TextStyle(color: ts)))),
+            ]);
+          }
+          if (!snapshot.hasData) {
+            return Column(children: [
+              _appBar(0, isDark),
+              const Expanded(child: Center(child: CircularProgressIndicator(color: Color(0xFF7C3AED)))),
+            ]);
+          }
 
-        Padding(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-            child: Row(children: [
-              Text('${_filtered.length} users found', style: TextStyle(fontSize: 12, color: ts)),
+          final users = snapshot.data!;
+          final filtered = _applyFilters(users);
+
+          return Column(children: [
+            _appBar(users.length, isDark),
+            Container(color: card, padding: const EdgeInsets.all(12), child: Column(children: [
+              TextField(
+                controller: _searchCtrl,
+                onChanged: (v) => setState(() => _search = v),
+                decoration: InputDecoration(
+                  hintText: 'Search by name or email...',
+                  hintStyle: TextStyle(color: ts, fontSize: 13),
+                  prefixIcon: Icon(Icons.search, color: appIconColor(Icons.search)),
+                  suffixIcon: _search.isNotEmpty ? IconButton(icon: Icon(Icons.clear, color: appIconColor(Icons.clear)),
+                      onPressed: () { _searchCtrl.clear(); setState(() => _search = ''); }) : null,
+                  filled: true, fillColor: isDark ? const Color(0xFF2A2A3E) : const Color(0xFFF5F7FA),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+                  contentPadding: const EdgeInsets.symmetric(vertical: 10),
+                ),
+              ),
+              const SizedBox(height: 8),
+              SizedBox(height: 32, child: ListView(scrollDirection: Axis.horizontal,
+                  children: _filters.map((f) => Padding(padding: const EdgeInsets.only(right: 8),
+                      child: FilterChip(
+                        label: Text(f, style: TextStyle(fontSize: 12, color: _filter == f ? Colors.white : tp,
+                            fontWeight: _filter == f ? FontWeight.w600 : FontWeight.normal)),
+                        selected: _filter == f,
+                        onSelected: (_) => setState(() => _filter = f),
+                        backgroundColor: isDark ? const Color(0xFF2A2A3E) : const Color(0xFFF5F7FA),
+                        selectedColor: const Color(0xFF7C3AED),
+                        checkmarkColor: Colors.white, side: BorderSide.none,
+                        padding: const EdgeInsets.symmetric(horizontal: 4),
+                      ))).toList())),
             ])),
 
-        Expanded(
-          child: ListView.builder(
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            itemCount: _filtered.length,
-            itemBuilder: (context, i) {
-              final user = _filtered[i];
-              return _UserCard(user: user, card: card, tp: tp, ts: ts,
-                  onTap: () => _showUserDetail(context, user, tp, ts, card));
-            },
-          ),
-        ),
-      ]),
+            Padding(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                child: Row(children: [
+                  Text('${filtered.length} users found', style: TextStyle(fontSize: 12, color: ts)),
+                ])),
+
+            Expanded(
+              child: filtered.isEmpty
+                  ? Center(child: Text('No users match this search/filter', style: TextStyle(color: ts, fontSize: 13)))
+                  : ListView.builder(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                itemCount: filtered.length,
+                itemBuilder: (context, i) {
+                  final user = filtered[i];
+                  return _UserCard(
+                    key: ValueKey(user.uid),
+                    user: user,
+                    card: card, tp: tp, ts: ts,
+                    firestoreService: _firestoreService,
+                    onTap: () => _showUserDetail(context, user, tp, ts, card),
+                  );
+                },
+              ),
+            ),
+          ]);
+        },
+      ),
     );
   }
 
-  void _showUserDetail(BuildContext context, AdminUser user, Color tp, Color ts, Color card) {
+  Widget _appBar(int totalCount, bool isDark) => AppBar(
+    backgroundColor: const Color(0xFF7C3AED),
+    foregroundColor: Colors.white,
+    automaticallyImplyLeading: false,
+    title: const Text('User Management', style: TextStyle(fontWeight: FontWeight.bold)),
+    actions: [
+      Container(margin: const EdgeInsets.only(right: 12),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+          decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.2), borderRadius: BorderRadius.circular(20)),
+          child: Text('$totalCount users', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold))),
+    ],
+  );
+
+  void _showUserDetail(BuildContext context, UserModel user, Color tp, Color ts, Color card) {
     showModalBottomSheet(context: context, isScrollControlled: true, shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-        builder: (_) => Padding(
+        builder: (sheetCtx) => Padding(
           padding: const EdgeInsets.all(20),
           child: Column(mainAxisSize: MainAxisSize.min, children: [
             Container(width: 40, height: 4, decoration: BoxDecoration(color: ts, borderRadius: BorderRadius.circular(2))),
             const SizedBox(height: 16),
             CircleAvatar(radius: 32, backgroundColor: const Color(0xFF7C3AED).withValues(alpha: 0.1),
-                child: Text(user.name[0], style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Color(0xFF7C3AED)))),
+                child: Text(user.fullName.isNotEmpty ? user.fullName[0].toUpperCase() : '?',
+                    style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Color(0xFF7C3AED)))),
             const SizedBox(height: 8),
             Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-              Text(user.name, style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: tp)),
+              Text(user.fullName, style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: tp)),
               if (user.isVerified) ...[const SizedBox(width: 4), const Icon(Icons.verified_rounded, color: Color(0xFF1A73E8), size: 18)],
             ]),
             Text(user.email, style: TextStyle(color: ts, fontSize: 13)),
+            Text(user.phoneNumber, style: TextStyle(color: ts, fontSize: 12)),
             const SizedBox(height: 16),
-            Row(mainAxisAlignment: MainAxisAlignment.spaceAround, children: [
-              _DetailStat(label: 'Trips', value: '${user.totalTrips}', color: const Color(0xFF1A73E8)),
-              _DetailStat(label: 'Safety', value: '${user.safetyScore.round()}', color: const Color(0xFF22C55E)),
-              _DetailStat(label: 'Joined', value: user.joinDate, color: const Color(0xFF7C3AED)),
-            ]),
+            FutureBuilder<List<TripModel>>(
+              future: _firestoreService.userTrips(user.uid),
+              builder: (context, snap) {
+                final trips = snap.data ?? [];
+                final completed = trips.where((t) => t.status == TripStatus.completed).length;
+                final cancelled = trips.where((t) => t.status == TripStatus.cancelled).length;
+                final score = SafetyScore.calculateFromCounts(
+                  total: trips.length,
+                  completed: completed,
+                  cancelled: cancelled,
+                  contactsCount: user.emergencyContacts.length,
+                  locationOn: user.isLocationSharing,
+                );
+                return Row(mainAxisAlignment: MainAxisAlignment.spaceAround, children: [
+                  _DetailStat(label: 'Trips', value: snap.connectionState == ConnectionState.waiting ? '…' : '${trips.length}', color: const Color(0xFF1A73E8)),
+                  _DetailStat(label: 'Safety', value: snap.connectionState == ConnectionState.waiting ? '…' : '${score.overall.round()}', color: const Color(0xFF22C55E)),
+                  _DetailStat(label: 'Joined', value: DateFormat('dd MMM yyyy').format(user.createdAt), color: const Color(0xFF7C3AED)),
+                ]);
+              },
+            ),
             const SizedBox(height: 16),
             Row(children: [
               Expanded(child: OutlinedButton.icon(
-                onPressed: () => Navigator.pop(context),
-                icon: const Icon(Icons.block_rounded, color: Color(0xFFEF4444)),
-                label: const Text('Block', style: TextStyle(color: Color(0xFFEF4444))),
+                onPressed: () async {
+                  Navigator.pop(sheetCtx);
+                  await _toggleBlocked(user);
+                },
+                icon: Icon(user.isBlocked ? Icons.lock_open_rounded : Icons.block_rounded, color: const Color(0xFFEF4444)),
+                label: Text(user.isBlocked ? 'Unblock' : 'Block', style: const TextStyle(color: Color(0xFFEF4444))),
                 style: OutlinedButton.styleFrom(side: const BorderSide(color: Color(0xFFEF4444)), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
               )),
               const SizedBox(width: 10),
               Expanded(child: ElevatedButton.icon(
-                onPressed: () => Navigator.pop(context),
-                icon: Icon(Icons.verified_rounded, color: appIconColor(Icons.verified_rounded)),
-                label: const Text('Verify'),
+                onPressed: () async {
+                  Navigator.pop(sheetCtx);
+                  await _toggleVerified(user);
+                },
+                icon: Icon(user.isVerified ? Icons.cancel_outlined : Icons.verified_rounded, color: appIconColor(Icons.verified_rounded)),
+                label: Text(user.isVerified ? 'Unverify' : 'Verify'),
                 style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF7C3AED), foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
               )),
             ]),
@@ -172,10 +230,11 @@ class _AdminUsersScreenState extends State<AdminUsersScreen> {
 }
 
 class _UserCard extends StatelessWidget {
-  final AdminUser user;
+  final UserModel user;
   final Color card, tp, ts;
+  final FirestoreService firestoreService;
   final VoidCallback onTap;
-  const _UserCard({required this.user, required this.card, required this.tp, required this.ts, required this.onTap});
+  const _UserCard({super.key, required this.user, required this.card, required this.tp, required this.ts, required this.firestoreService, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -191,7 +250,8 @@ class _UserCard extends StatelessWidget {
         child: Row(children: [
           Stack(children: [
             CircleAvatar(radius: 22, backgroundColor: const Color(0xFF7C3AED).withValues(alpha: 0.1),
-                child: Text(user.name[0], style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF7C3AED), fontSize: 16))),
+                child: Text(user.fullName.isNotEmpty ? user.fullName[0].toUpperCase() : '?',
+                    style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF7C3AED), fontSize: 16))),
             if (user.isVerified) Positioned(bottom: 0, right: 0,
                 child: Container(padding: const EdgeInsets.all(1),
                     decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle),
@@ -200,18 +260,21 @@ class _UserCard extends StatelessWidget {
           const SizedBox(width: 12),
           Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Row(children: [
-              Text(user.name, style: TextStyle(fontWeight: FontWeight.w600, color: user.isBlocked ? ts : tp, fontSize: 14)),
+              Flexible(child: Text(user.fullName, style: TextStyle(fontWeight: FontWeight.w600, color: user.isBlocked ? ts : tp, fontSize: 14), overflow: TextOverflow.ellipsis)),
               if (user.isBlocked) ...[const SizedBox(width: 6),
                 Container(padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
                     decoration: BoxDecoration(color: const Color(0xFFEF4444).withValues(alpha: 0.1), borderRadius: BorderRadius.circular(20)),
                     child: const Text('Blocked', style: TextStyle(color: Color(0xFFEF4444), fontSize: 9, fontWeight: FontWeight.bold)))],
             ]),
-            Text(user.email, style: TextStyle(fontSize: 11, color: ts)),
+            Text(user.email, style: TextStyle(fontSize: 11, color: ts), overflow: TextOverflow.ellipsis),
           ])),
-          Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-            Text('${user.totalTrips} trips', style: TextStyle(fontSize: 11, color: ts)),
-            Text('Score: ${user.safetyScore.round()}', style: const TextStyle(fontSize: 11, color: Color(0xFF22C55E), fontWeight: FontWeight.w600)),
-          ]),
+          FutureBuilder<int>(
+            future: firestoreService.userTripCount(user.uid),
+            builder: (context, snap) => Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+              Text(snap.hasData ? '${snap.data} trips' : '… trips', style: TextStyle(fontSize: 11, color: ts)),
+              Text(DateFormat('dd MMM yyyy').format(user.createdAt), style: const TextStyle(fontSize: 11, color: Color(0xFF22C55E), fontWeight: FontWeight.w600)),
+            ]),
+          ),
         ]),
       ),
     );

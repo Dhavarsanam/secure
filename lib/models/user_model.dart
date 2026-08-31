@@ -10,6 +10,10 @@ class UserModel {
   final List<String> approvedContacts; // list of emails — used for location-sharing visibility & SOS alert emails
   final List<EmergencyContact> emergencyContacts; // named contacts with phone numbers — shown on the SOS screen
   final bool isLocationSharing;
+  // Admin-managed moderation fields (set from the Admin Panel → User
+  // Management screen). Real, persisted Firestore fields — not demo data.
+  final bool isVerified;
+  final bool isBlocked;
   final DateTime createdAt;
   final DateTime updatedAt;
 
@@ -22,6 +26,8 @@ class UserModel {
     this.approvedContacts = const [],
     this.emergencyContacts = const [],
     this.isLocationSharing = false,
+    this.isVerified = false,
+    this.isBlocked = false,
     required this.createdAt,
     required this.updatedAt,
   });
@@ -38,6 +44,8 @@ class UserModel {
           .map((e) => EmergencyContact.fromMap(Map<String, dynamic>.from(e as Map)))
           .toList(),
       isLocationSharing: map['isLocationSharing'] ?? false,
+      isVerified: map['isVerified'] ?? false,
+      isBlocked: map['isBlocked'] ?? false,
       createdAt: (map['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
       updatedAt: (map['updatedAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
     );
@@ -53,6 +61,8 @@ class UserModel {
       'approvedContacts': approvedContacts,
       'emergencyContacts': emergencyContacts.map((e) => e.toMap()).toList(),
       'isLocationSharing': isLocationSharing,
+      'isVerified': isVerified,
+      'isBlocked': isBlocked,
       'createdAt': Timestamp.fromDate(createdAt),
       'updatedAt': Timestamp.fromDate(updatedAt),
     };
@@ -67,6 +77,8 @@ class UserModel {
     List<String>? approvedContacts,
     List<EmergencyContact>? emergencyContacts,
     bool? isLocationSharing,
+    bool? isVerified,
+    bool? isBlocked,
     DateTime? createdAt,
     DateTime? updatedAt,
   }) {
@@ -79,6 +91,8 @@ class UserModel {
       approvedContacts: approvedContacts ?? this.approvedContacts,
       emergencyContacts: emergencyContacts ?? this.emergencyContacts,
       isLocationSharing: isLocationSharing ?? this.isLocationSharing,
+      isVerified: isVerified ?? this.isVerified,
+      isBlocked: isBlocked ?? this.isBlocked,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
     );

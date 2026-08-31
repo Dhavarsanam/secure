@@ -41,44 +41,55 @@ class AuthProvider extends ChangeNotifier {
         notifyListeners();
         return;
       }
-      final data = await _authService.getUserData(fbUser.uid);
-      final prefs = await SharedPreferences.getInstance();
-      final cachedImage = prefs.getString(_keyProfileImage);
-
-      final emergencyContacts = (data?['emergencyContacts'] as List<dynamic>? ?? [])
-          .map((e) => EmergencyContact.fromMap(Map<String, dynamic>.from(e as Map)))
-          .toList();
-
-      // approvedContacts should always exactly mirror the emails of real,
-      // currently-saved emergency contacts. If it doesn't (e.g. leftover
-      // "Name: Phone" strings from a legacy quick-add flow that never
-      // created a matching EmergencyContact — those had no way to ever be
-      // removed by the user), heal it here rather than let stale/garbage
-      // entries silently inflate the Contacts count and Safety Score
-      // forever.
-      final validEmails = emergencyContacts.where((c) => c.email.isNotEmpty).map((c) => c.email).toSet();
-      final storedApproved = List<String>.from(data?['approvedContacts'] ?? []);
-      final cleanedApproved = storedApproved.where(validEmails.contains).toList();
-      if (cleanedApproved.length != storedApproved.length) {
-        unawaited(_authService.updateUserData(fbUser.uid, {'approvedContacts': cleanedApproved}));
-      }
-
-      _currentUser = UserModel(
-        uid: fbUser.uid,
-        fullName: data?['fullName'] ?? fbUser.displayName ?? '',
-        email: data?['email'] ?? fbUser.email ?? '',
-        phoneNumber: data?['phoneNumber'] ?? '',
-        profileImageUrl: data?['profileImageUrl'] ?? cachedImage,
-        approvedContacts: cleanedApproved,
-        emergencyContacts: emergencyContacts,
-        isLocationSharing: data?['isLocationSharing'] ?? false,
-        createdAt: DateTime.now(),
-        updatedAt: DateTime.now(),
-      );
-      _isLoggedIn = true;
-      notifyListeners();
+      await _loadUserData(fbUser);
     });
     _setLoading(false);
+  }
+
+  // Fetches the Firestore user doc for a just-authenticated Firebase user
+  // and populates _currentUser. Shared by the auth-state listener (handles
+  // "already logged in on app restart") AND by login()/signUp() directly
+  // (see below) — calling it synchronously from login()/signUp() means
+  // _currentUser is guaranteed to be populated by the time those futures
+  // resolve, instead of racing an arbitrary fixed delay against however
+  // long the Firestore read actually takes.
+  Future<void> _loadUserData(fb_auth.User fbUser) async {
+    final data = await _authService.getUserData(fbUser.uid);
+    final prefs = await SharedPreferences.getInstance();
+    final cachedImage = prefs.getString(_keyProfileImage);
+
+    final emergencyContacts = (data?['emergencyContacts'] as List<dynamic>? ?? [])
+        .map((e) => EmergencyContact.fromMap(Map<String, dynamic>.from(e as Map)))
+        .toList();
+
+    // approvedContacts should always exactly mirror the emails of real,
+    // currently-saved emergency contacts. If it doesn't (e.g. leftover
+    // "Name: Phone" strings from a legacy quick-add flow that never
+    // created a matching EmergencyContact — those had no way to ever be
+    // removed by the user), heal it here rather than let stale/garbage
+    // entries silently inflate the Contacts count and Safety Score
+    // forever.
+    final validEmails = emergencyContacts.where((c) => c.email.isNotEmpty).map((c) => c.email).toSet();
+    final storedApproved = List<String>.from(data?['approvedContacts'] ?? []);
+    final cleanedApproved = storedApproved.where(validEmails.contains).toList();
+    if (cleanedApproved.length != storedApproved.length) {
+      unawaited(_authService.updateUserData(fbUser.uid, {'approvedContacts': cleanedApproved}));
+    }
+
+    _currentUser = UserModel(
+      uid: fbUser.uid,
+      fullName: data?['fullName'] ?? fbUser.displayName ?? '',
+      email: data?['email'] ?? fbUser.email ?? '',
+      phoneNumber: data?['phoneNumber'] ?? '',
+      profileImageUrl: data?['profileImageUrl'] ?? cachedImage,
+      approvedContacts: cleanedApproved,
+      emergencyContacts: emergencyContacts,
+      isLocationSharing: data?['isLocationSharing'] ?? false,
+      createdAt: DateTime.now(),
+      updatedAt: DateTime.now(),
+    );
+    _isLoggedIn = true;
+    notifyListeners();
   }
 
   @override
@@ -103,11 +114,15 @@ class AuthProvider extends ChangeNotifier {
     final fbUser = result['user'] as fb_auth.User?;
     if (fbUser != null) {
       unawaited(_firestoreService.logActivity(fbUser.uid, UserActivityType.login));
+      // Load the Firestore user doc HERE and wait for it, instead of
+      // guessing with a fixed delay. The _authSub listener will also fire
+      // for this same sign-in and call _loadUserData again — harmless,
+      // it just re-sets the same data — but this call is what guarantees
+      // _currentUser is populated by the time login() returns, so the
+      // screen the caller navigates to next never renders with an empty
+      // user.
+      await _loadUserData(fbUser);
     }
-    // _authSub listener above fills in _currentUser once Firebase confirms
-    // the session, but we also do it here so the caller's immediate
-    // `if (result['success'])` navigation doesn't race the stream.
-    await Future.delayed(const Duration(milliseconds: 300));
     return {'success': true};
   }
 
@@ -129,7 +144,12 @@ class AuthProvider extends ChangeNotifier {
     if (result['success'] != true) {
       return {'success': false, 'error': result['error']};
     }
-    await Future.delayed(const Duration(milliseconds: 300));
+    // Same fix as login() — load the new user's Firestore doc and wait
+    // for it directly, instead of a fixed delay racing the auth listener.
+    final fbUser = result['user'] as fb_auth.User?;
+    if (fbUser != null) {
+      await _loadUserData(fbUser);
+    }
     return {'success': true};
   }
 

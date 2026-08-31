@@ -1,6 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../../core/services/firestore_service.dart';
+import '../../models/sos_alert_model.dart';
+import '../../models/trip_model.dart';
+import '../../models/user_model.dart';
 import '../../providers/theme_provider.dart';
+import '../../core/utils/time_ago.dart';
 import '../auth/login_screen.dart';
 import 'admin_users_screen.dart';
 import 'admin_trips_screen.dart';
@@ -93,8 +98,17 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
 }
 
 // ── DASHBOARD TAB ─────────────────────────────────────────
-class _DashboardTab extends StatelessWidget {
+// Every figure is computed live from Firestore (users / trips / sos_alerts
+// collections). Nothing here is a static/demo number, and nothing is
+// duplicated: each stat is derived once from the real collections below.
+class _DashboardTab extends StatefulWidget {
   const _DashboardTab();
+  @override
+  State<_DashboardTab> createState() => _DashboardTabState();
+}
+
+class _DashboardTabState extends State<_DashboardTab> {
+  final _firestoreService = FirestoreService();
 
   void _showSnack(BuildContext context, String msg, Color color) {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -142,17 +156,6 @@ class _DashboardTab extends StatelessWidget {
     );
   }
 
-  static const _stats = {
-    'totalUsers': 248,
-    'activeUsers': 183,
-    'totalTrips': 1024,
-    'activeTrips': 12,
-    'completedTrips': 982,
-    'sosAlerts': 3,
-    'verifiedUsers': 156,
-    'totalKm': 8742,
-  };
-
   Future<void> _logout(BuildContext context) async {
     final ok = await showDialog<bool>(
         context: context,
@@ -193,193 +196,241 @@ class _DashboardTab extends StatelessWidget {
 
     return Scaffold(
       backgroundColor: bg,
-      body: CustomScrollView(
-        slivers: [
-          SliverAppBar(
-            expandedHeight: 140,
-            floating: false,
-            pinned: true,
-            backgroundColor: const Color(0xFF7C3AED),
-            automaticallyImplyLeading: false,
-            actions: [
-              // Logout button
-              IconButton(
-                icon: const Icon(Icons.logout_rounded, color: Colors.white),
-                tooltip: 'Logout',
-                onPressed: () => _logout(context),
-              ),
-              const SizedBox(width: 4),
-            ],
-            flexibleSpace: FlexibleSpaceBar(
-              background: Container(
-                decoration: const BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: [Color(0xFF7C3AED), Color(0xFF4F46E5)],
-                    begin: Alignment.topLeft, end: Alignment.bottomRight,
-                  ),
-                ),
-                padding: const EdgeInsets.fromLTRB(20, 60, 20, 16),
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Row(children: [
-                    Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.2), borderRadius: BorderRadius.circular(10)),
-                      child: const Icon(Icons.admin_panel_settings_rounded, color: Colors.white, size: 22),
-                    ),
-                    const SizedBox(width: 10),
-                    const Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      Text('Admin Panel', style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold)),
-                      Text('SecureRide Dashboard', style: TextStyle(color: Colors.white70, fontSize: 12)),
-                    ]),
-                    const Spacer(),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                      decoration: BoxDecoration(
-                          color: const Color(0xFF22C55E).withValues(alpha: 0.2),
-                          borderRadius: BorderRadius.circular(20),
-                          border: Border.all(color: const Color(0xFF22C55E).withValues(alpha: 0.4))),
-                      child: const Row(children: [
-                        Icon(Icons.circle, color: Color(0xFF22C55E), size: 8),
-                        SizedBox(width: 4),
-                        Text('Live', style: TextStyle(color: Color(0xFF22C55E), fontSize: 11, fontWeight: FontWeight.bold)),
-                      ]),
-                    ),
-                  ]),
-                ]),
-              ),
-              title: null,
-            ),
-          ),
+      body: StreamBuilder<List<UserModel>>(
+        stream: _firestoreService.allUsersStream(),
+        builder: (context, userSnap) {
+          return StreamBuilder<List<TripModel>>(
+            stream: _firestoreService.allTripsStream(),
+            builder: (context, tripSnap) {
+              return StreamBuilder<List<SosAlertModel>>(
+                stream: _firestoreService.allSosAlertsStream(),
+                builder: (context, sosSnap) {
+                  if (!userSnap.hasData || !tripSnap.hasData || !sosSnap.hasData) {
+                    return const Center(child: CircularProgressIndicator(color: Color(0xFF7C3AED)));
+                  }
 
-          SliverPadding(
-            padding: const EdgeInsets.all(16),
-            sliver: SliverList(
-              delegate: SliverChildListDelegate([
+                  final users = userSnap.data!;
+                  final trips = tripSnap.data!;
+                  final sosAlerts = sosSnap.data!;
 
-                // SOS Alert Banner
-                if (_stats['sosAlerts']! > 0)
-                  Container(
-                    margin: const EdgeInsets.only(bottom: 16),
-                    padding: const EdgeInsets.all(14),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFDC2626).withValues(alpha: 0.1),
-                      borderRadius: BorderRadius.circular(14),
-                      border: Border.all(color: const Color(0xFFDC2626).withValues(alpha: 0.3)),
-                    ),
-                    child: Row(children: [
-                      const Icon(Icons.warning_amber_rounded, color: Color(0xFFDC2626), size: 22),
-                      const SizedBox(width: 10),
-                      Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                        Text('${_stats['sosAlerts']} Active SOS Alerts!',
-                            style: const TextStyle(color: Color(0xFFDC2626), fontWeight: FontWeight.bold, fontSize: 14)),
-                        const Text('Immediate attention required', style: TextStyle(color: Color(0xFFDC2626), fontSize: 12)),
-                      ])),
-                      ElevatedButton(
-                        onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AdminSosScreen())),
-                        style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFFDC2626), foregroundColor: Colors.white,
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                            textStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
-                        child: const Text('View'),
+                  final totalUsers = users.length;
+                  final verifiedUsers = users.where((u) => u.isVerified).length;
+                  final activeUsers = users.where((u) => !u.isBlocked).length;
+
+                  final totalTrips = trips.length;
+                  final activeTrips = trips.where((t) => t.status == TripStatus.active).length;
+                  final completedTrips = trips.where((t) => t.status == TripStatus.completed).length;
+                  final cancelledTrips = totalTrips - activeTrips - completedTrips;
+                  final totalKm = trips.fold<double>(0, (sum, t) => sum + (t.distanceKm ?? 0));
+
+                  final activeSos = sosAlerts.where((a) => a.status == SosStatus.active).length;
+
+                  // Recent Activity — the 5 most recent real events across
+                  // new signups, completed trips, and SOS alerts, merged
+                  // and sorted by actual timestamp (no invented entries).
+                  final activity = <_ActivityEntry>[
+                    ...users.map((u) => _ActivityEntry(
+                        icon: Icons.person_add_rounded, color: 0xFF1A73E8,
+                        title: 'New user registered', sub: '${u.fullName} — ${timeAgo(u.createdAt)}',
+                        time: u.createdAt)),
+                    ...trips.where((t) => t.status == TripStatus.completed).map((t) => _ActivityEntry(
+                        icon: Icons.directions_car_rounded, color: 0xFF22C55E,
+                        title: 'Trip completed', sub: '${t.tripCode}: ${t.startLocationName} → ${t.destinationName} — ${timeAgo(t.updatedAt)}',
+                        time: t.updatedAt)),
+                    ...sosAlerts.map((a) => _ActivityEntry(
+                        icon: Icons.sos_rounded, color: 0xFFDC2626,
+                        title: 'SOS Alert triggered', sub: '${a.senderName} — ${timeAgo(a.triggeredAt)}',
+                        time: a.triggeredAt)),
+                  ]..sort((a, b) => b.time.compareTo(a.time));
+                  final recentActivity = activity.take(5).toList();
+
+                  return CustomScrollView(
+                    slivers: [
+                      SliverAppBar(
+                        expandedHeight: 140,
+                        floating: false,
+                        pinned: true,
+                        backgroundColor: const Color(0xFF7C3AED),
+                        automaticallyImplyLeading: false,
+                        actions: [
+                          IconButton(
+                            icon: const Icon(Icons.logout_rounded, color: Colors.white),
+                            tooltip: 'Logout',
+                            onPressed: () => _logout(context),
+                          ),
+                          const SizedBox(width: 4),
+                        ],
+                        flexibleSpace: FlexibleSpaceBar(
+                          background: Container(
+                            decoration: const BoxDecoration(
+                              gradient: LinearGradient(
+                                colors: [Color(0xFF7C3AED), Color(0xFF4F46E5)],
+                                begin: Alignment.topLeft, end: Alignment.bottomRight,
+                              ),
+                            ),
+                            padding: const EdgeInsets.fromLTRB(20, 60, 20, 16),
+                            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                              Row(children: [
+                                Container(
+                                  padding: const EdgeInsets.all(8),
+                                  decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.2), borderRadius: BorderRadius.circular(10)),
+                                  child: const Icon(Icons.admin_panel_settings_rounded, color: Colors.white, size: 22),
+                                ),
+                                const SizedBox(width: 10),
+                                const Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                                  Text('Admin Panel', style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold)),
+                                  Text('SecureRide Dashboard', style: TextStyle(color: Colors.white70, fontSize: 12)),
+                                ]),
+                                const Spacer(),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                                  decoration: BoxDecoration(
+                                      color: const Color(0xFF22C55E).withValues(alpha: 0.2),
+                                      borderRadius: BorderRadius.circular(20),
+                                      border: Border.all(color: const Color(0xFF22C55E).withValues(alpha: 0.4))),
+                                  child: const Row(children: [
+                                    Icon(Icons.circle, color: Color(0xFF22C55E), size: 8),
+                                    SizedBox(width: 4),
+                                    Text('Live', style: TextStyle(color: Color(0xFF22C55E), fontSize: 11, fontWeight: FontWeight.bold)),
+                                  ]),
+                                ),
+                              ]),
+                            ]),
+                          ),
+                          title: null,
+                        ),
                       ),
-                    ]),
-                  ),
 
-                // Stats Grid
-                Text('Overview', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: tp)),
-                const SizedBox(height: 12),
-                GridView.count(
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  crossAxisCount: 2,
-                  mainAxisSpacing: 12, crossAxisSpacing: 12,
-                  childAspectRatio: 1.6,
-                  children: [
-                    _StatCard(icon: Icons.people_rounded, label: 'Total Users', value: '${_stats['totalUsers']}',
-                        sub: '${_stats['activeUsers']} active', color: const Color(0xFF1A73E8), card: card, tp: tp, ts: ts),
-                    _StatCard(icon: Icons.directions_car_rounded, label: 'Total Trips', value: '${_stats['totalTrips']}',
-                        sub: '${_stats['activeTrips']} active', color: const Color(0xFF22C55E), card: card, tp: tp, ts: ts),
-                    _StatCard(icon: Icons.verified_rounded, label: 'Verified Users', value: '${_stats['verifiedUsers']}',
-                        sub: '${((_stats['verifiedUsers']! / _stats['totalUsers']!) * 100).round()}% verified',
-                        color: const Color(0xFF7C3AED), card: card, tp: tp, ts: ts),
-                    _StatCard(icon: Icons.straighten_rounded, label: 'Total KM', value: '${_stats['totalKm']}',
-                        sub: 'distance covered', color: const Color(0xFFF59E0B), card: card, tp: tp, ts: ts),
-                  ],
-                ),
+                      SliverPadding(
+                        padding: const EdgeInsets.all(16),
+                        sliver: SliverList(
+                          delegate: SliverChildListDelegate([
 
-                const SizedBox(height: 24),
+                            if (activeSos > 0)
+                              Container(
+                                margin: const EdgeInsets.only(bottom: 16),
+                                padding: const EdgeInsets.all(14),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFDC2626).withValues(alpha: 0.1),
+                                  borderRadius: BorderRadius.circular(14),
+                                  border: Border.all(color: const Color(0xFFDC2626).withValues(alpha: 0.3)),
+                                ),
+                                child: Row(children: [
+                                  const Icon(Icons.warning_amber_rounded, color: Color(0xFFDC2626), size: 22),
+                                  const SizedBox(width: 10),
+                                  Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                                    Text('$activeSos Active SOS Alerts!',
+                                        style: const TextStyle(color: Color(0xFFDC2626), fontWeight: FontWeight.bold, fontSize: 14)),
+                                    const Text('Immediate attention required', style: TextStyle(color: Color(0xFFDC2626), fontSize: 12)),
+                                  ])),
+                                  ElevatedButton(
+                                    onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AdminSosScreen())),
+                                    style: ElevatedButton.styleFrom(
+                                        backgroundColor: const Color(0xFFDC2626), foregroundColor: Colors.white,
+                                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                        textStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
+                                    child: const Text('View'),
+                                  ),
+                                ]),
+                              ),
 
-                // Trip Status
-                Text('Trip Status', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: tp)),
-                const SizedBox(height: 12),
-                Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(color: card, borderRadius: BorderRadius.circular(16),
-                      boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 8)]),
-                  child: Column(children: [
-                    _StatusBar(label: 'Completed', value: _stats['completedTrips']!, total: _stats['totalTrips']!, color: const Color(0xFF22C55E), tp: tp, ts: ts),
-                    const SizedBox(height: 12),
-                    _StatusBar(label: 'Active', value: _stats['activeTrips']!, total: _stats['totalTrips']!, color: const Color(0xFF1A73E8), tp: tp, ts: ts),
-                    const SizedBox(height: 12),
-                    _StatusBar(label: 'Cancelled',
-                        value: _stats['totalTrips']! - _stats['completedTrips']! - _stats['activeTrips']!,
-                        total: _stats['totalTrips']!, color: const Color(0xFFEF4444), tp: tp, ts: ts),
-                  ]),
-                ),
+                            Text('Overview', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: tp)),
+                            const SizedBox(height: 12),
+                            GridView.count(
+                              shrinkWrap: true,
+                              physics: const NeverScrollableScrollPhysics(),
+                              crossAxisCount: 2,
+                              mainAxisSpacing: 12, crossAxisSpacing: 12,
+                              childAspectRatio: 1.6,
+                              children: [
+                                _StatCard(icon: Icons.people_rounded, label: 'Total Users', value: '$totalUsers',
+                                    sub: '$activeUsers active', color: const Color(0xFF1A73E8), card: card, tp: tp, ts: ts),
+                                _StatCard(icon: Icons.directions_car_rounded, label: 'Total Trips', value: '$totalTrips',
+                                    sub: '$activeTrips active', color: const Color(0xFF22C55E), card: card, tp: tp, ts: ts),
+                                _StatCard(icon: Icons.verified_rounded, label: 'Verified Users', value: '$verifiedUsers',
+                                    sub: totalUsers == 0 ? '0% verified' : '${((verifiedUsers / totalUsers) * 100).round()}% verified',
+                                    color: const Color(0xFF7C3AED), card: card, tp: tp, ts: ts),
+                                _StatCard(icon: Icons.straighten_rounded, label: 'Total KM', value: totalKm.toStringAsFixed(1),
+                                    sub: 'distance covered', color: const Color(0xFFF59E0B), card: card, tp: tp, ts: ts),
+                              ],
+                            ),
 
-                const SizedBox(height: 24),
+                            const SizedBox(height: 24),
 
-                // Recent Activity
-                Text('Recent Activity', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: tp)),
-                const SizedBox(height: 12),
-                ..._recentActivities.map((a) => _ActivityTile(activity: a, card: card, tp: tp, ts: ts)),
+                            Text('Trip Status', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: tp)),
+                            const SizedBox(height: 12),
+                            Container(
+                              padding: const EdgeInsets.all(16),
+                              decoration: BoxDecoration(color: card, borderRadius: BorderRadius.circular(16),
+                                  boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 8)]),
+                              child: Column(children: [
+                                _StatusBar(label: 'Completed', value: completedTrips, total: totalTrips, color: const Color(0xFF22C55E), tp: tp, ts: ts),
+                                const SizedBox(height: 12),
+                                _StatusBar(label: 'Active', value: activeTrips, total: totalTrips, color: const Color(0xFF1A73E8), tp: tp, ts: ts),
+                                const SizedBox(height: 12),
+                                _StatusBar(label: 'Cancelled', value: cancelledTrips, total: totalTrips, color: const Color(0xFFEF4444), tp: tp, ts: ts),
+                              ]),
+                            ),
 
-                const SizedBox(height: 24),
+                            const SizedBox(height: 24),
 
-                // Quick Actions
-                Text('Quick Actions', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: tp)),
-                const SizedBox(height: 12),
-                Row(children: [
-                  Expanded(child: _QuickAction(icon: Icons.person_add_rounded, label: 'Add User', color: const Color(0xFF1A73E8), onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AdminUsersScreen())))),
-                  const SizedBox(width: 10),
-                  Expanded(child: _QuickAction(icon: Icons.block_rounded, label: 'Block User', color: const Color(0xFFEF4444), onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AdminUsersScreen())))),
-                  const SizedBox(width: 10),
-                  Expanded(child: _QuickAction(icon: Icons.download_rounded, label: 'Export CSV', color: const Color(0xFF22C55E), onTap: () => _showSnack(context, 'User data exported to CSV', const Color(0xFF22C55E)))),
-                  const SizedBox(width: 10),
-                  Expanded(child: _QuickAction(icon: Icons.notifications_rounded, label: 'Broadcast', color: const Color(0xFFF59E0B), onTap: () => _showBroadcastDialog(context))),
-                ]),
+                            Text('Recent Activity', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: tp)),
+                            const SizedBox(height: 12),
+                            if (recentActivity.isEmpty)
+                              Text('No activity yet', style: TextStyle(color: ts, fontSize: 13))
+                            else
+                              ...recentActivity.map((a) => _ActivityTile(activity: a, card: card, tp: tp, ts: ts)),
 
-                const SizedBox(height: 24),
+                            const SizedBox(height: 24),
 
-                // Logout button at bottom
-                SizedBox(
-                  width: double.infinity, height: 50,
-                  child: OutlinedButton.icon(
-                    onPressed: () => _logout(context),
-                    icon: const Icon(Icons.logout_rounded, color: Color(0xFFEF4444)),
-                    label: const Text('Logout Admin Panel', style: TextStyle(color: Color(0xFFEF4444), fontWeight: FontWeight.w600, fontSize: 15)),
-                    style: OutlinedButton.styleFrom(
-                        side: const BorderSide(color: Color(0xFFEF4444), width: 1.5),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
-                  ),
-                ),
-                const SizedBox(height: 24),
-              ]),
-            ),
-          ),
-        ],
+                            Text('Quick Actions', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: tp)),
+                            const SizedBox(height: 12),
+                            Row(children: [
+                              Expanded(child: _QuickAction(icon: Icons.people_alt_rounded, label: 'Manage Users', color: const Color(0xFF1A73E8), onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AdminUsersScreen())))),
+                              const SizedBox(width: 10),
+                              Expanded(child: _QuickAction(icon: Icons.directions_car_rounded, label: 'Manage Trips', color: const Color(0xFF6366F1), onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AdminTripsScreen())))),
+                              const SizedBox(width: 10),
+                              Expanded(child: _QuickAction(icon: Icons.bar_chart_rounded, label: 'Reports', color: const Color(0xFFF59E0B), onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AdminReportsScreen())))),
+                              const SizedBox(width: 10),
+                              Expanded(child: _QuickAction(icon: Icons.notifications_rounded, label: 'Broadcast', color: const Color(0xFF22C55E), onTap: () => _showBroadcastDialog(context))),
+                            ]),
+
+                            const SizedBox(height: 24),
+
+                            SizedBox(
+                              width: double.infinity, height: 50,
+                              child: OutlinedButton.icon(
+                                onPressed: () => _logout(context),
+                                icon: const Icon(Icons.logout_rounded, color: Color(0xFFEF4444)),
+                                label: const Text('Logout Admin Panel', style: TextStyle(color: Color(0xFFEF4444), fontWeight: FontWeight.w600, fontSize: 15)),
+                                style: OutlinedButton.styleFrom(
+                                    side: const BorderSide(color: Color(0xFFEF4444), width: 1.5),
+                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
+                              ),
+                            ),
+                            const SizedBox(height: 24),
+                          ]),
+                        ),
+                      ),
+                    ],
+                  );
+                },
+              );
+            },
+          );
+        },
       ),
     );
   }
+}
 
-  static final _recentActivities = [
-    {'icon': Icons.person_add_rounded, 'color': 0xFF1A73E8, 'title': 'New user registered', 'sub': 'Ayesha K — 2 min ago'},
-    {'icon': Icons.directions_car_rounded, 'color': 0xFF22C55E, 'title': 'Trip completed', 'sub': 'FCW001: College → Junction — 5 min ago'},
-    {'icon': Icons.sos_rounded, 'color': 0xFFDC2626, 'title': 'SOS Alert triggered', 'sub': 'Nisha F — 12 min ago'},
-    {'icon': Icons.verified_rounded, 'color': 0xFF7C3AED, 'title': 'User verified', 'sub': 'Priya S — 30 min ago'},
-    {'icon': Icons.star_rounded, 'color': 0xFFF59E0B, 'title': 'New review submitted', 'sub': 'Ravi K rated 5 stars — 1 hr ago'},
-  ];
+class _ActivityEntry {
+  final IconData icon;
+  final int color;
+  final String title, sub;
+  final DateTime time;
+  _ActivityEntry({required this.icon, required this.color, required this.title, required this.sub, required this.time});
 }
 
 class _StatCard extends StatelessWidget {
@@ -428,7 +479,7 @@ class _StatusBar extends StatelessWidget {
 }
 
 class _ActivityTile extends StatelessWidget {
-  final Map<String, dynamic> activity;
+  final _ActivityEntry activity;
   final Color card, tp, ts;
   const _ActivityTile({required this.activity, required this.card, required this.tp, required this.ts});
   @override
@@ -439,12 +490,12 @@ class _ActivityTile extends StatelessWidget {
         boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.03), blurRadius: 6)]),
     child: Row(children: [
       Container(padding: const EdgeInsets.all(8),
-          decoration: BoxDecoration(color: Color(activity['color'] as int).withValues(alpha: 0.1), borderRadius: BorderRadius.circular(8)),
-          child: Icon(activity['icon'] as IconData, color: Color(activity['color'] as int), size: 18)),
+          decoration: BoxDecoration(color: Color(activity.color).withValues(alpha: 0.1), borderRadius: BorderRadius.circular(8)),
+          child: Icon(activity.icon, color: Color(activity.color), size: 18)),
       const SizedBox(width: 12),
       Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text(activity['title'] as String, style: TextStyle(fontWeight: FontWeight.w600, color: tp, fontSize: 13)),
-        Text(activity['sub'] as String, style: TextStyle(fontSize: 11, color: ts)),
+        Text(activity.title, style: TextStyle(fontWeight: FontWeight.w600, color: tp, fontSize: 13)),
+        Text(activity.sub, style: TextStyle(fontSize: 11, color: ts)),
       ])),
     ]),
   );

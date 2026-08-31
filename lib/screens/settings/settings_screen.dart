@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -34,10 +35,26 @@ class _SettingsScreenState extends State<SettingsScreen> {
   String _language = 'English';
   bool _prefsLoaded = false;
 
+  // ---- Hidden developer credit: tap "About SecureRide" 7 times within
+  // 3 seconds to reveal it. A normal single tap (or a slow tap that never
+  // reaches 7) still opens the plain About dialog — nothing changes there.
+  // The dialog only opens once taps STOP for a beat, because opening it
+  // on every tap would pop a modal after tap #1 and block further taps
+  // from ever reaching the tile.
+  int _aboutTapCount = 0;
+  DateTime? _aboutFirstTapAt;
+  Timer? _aboutDebounce;
+
   @override
   void initState() {
     super.initState();
     _loadLocalPrefs();
+  }
+
+  @override
+  void dispose() {
+    _aboutDebounce?.cancel();
+    super.dispose();
   }
 
   Future<void> _loadLocalPrefs() async {
@@ -241,12 +258,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               subtitle: 'App version and information',
               color: const Color(0xFF6B7280), card: card, tp: tp, ts: ts,
               trailingText: 'v1.0.0', trailingTextColor: ts, ts2: ts,
-              onTap: () => showAboutDialog(
-                context: context,
-                applicationName: 'SecureRide',
-                applicationVersion: '1.0.0',
-                applicationLegalese: '© 2025 SecureRide • Safe. Private. Connected.',
-              )),
+              onTap: () => _onAboutTap(context, card, tp, ts)),
 
           const SizedBox(height: 24),
 
@@ -311,6 +323,69 @@ class _SettingsScreenState extends State<SettingsScreen> {
             subtitle: Text(subtitle, style: TextStyle(color: ts, fontSize: 12)),
             trailing: trailing,
             onTap: onTap));
+  }
+
+  // ---- About tap counter — 7 rapid taps reveals the hidden credit dialog
+  // instead of the plain About dialog that tap. Any gap over 3s between
+  // taps resets the count, so it can never trigger by accident. ----
+  void _onAboutTap(BuildContext context, Color card, Color tp, Color ts) {
+    final now = DateTime.now();
+    if (_aboutFirstTapAt == null || now.difference(_aboutFirstTapAt!) > const Duration(seconds: 3)) {
+      _aboutTapCount = 0;
+      _aboutFirstTapAt = now;
+    }
+    _aboutTapCount++;
+    _aboutDebounce?.cancel();
+
+    if (_aboutTapCount >= 7) {
+      _aboutTapCount = 0;
+      _aboutFirstTapAt = null;
+      _showDeveloperCredit(context, card, tp, ts);
+      return;
+    }
+
+    // Wait a beat for another tap before opening anything — this is what
+    // lets several taps land on the tile before a modal ever appears.
+    _aboutDebounce = Timer(const Duration(milliseconds: 350), () {
+      if (!mounted) return;
+      _aboutTapCount = 0;
+      _aboutFirstTapAt = null;
+      showAboutDialog(
+        context: context,
+        applicationName: 'SecureRide',
+        applicationVersion: '1.0.0',
+        applicationLegalese: '© 2025 SecureRide • Safe. Private. Connected.',
+      );
+    });
+  }
+
+  void _showDeveloperCredit(BuildContext context, Color card, Color tp, Color ts) {
+    showDialog(context: context, builder: (dctx) => Dialog(
+      backgroundColor: card,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Container(width: 64, height: 64,
+              decoration: BoxDecoration(color: const Color(0xFF1A73E8).withValues(alpha: 0.12), shape: BoxShape.circle),
+              child: const Icon(Icons.code_rounded, color: Color(0xFF1A73E8), size: 32)),
+          const SizedBox(height: 16),
+          Text('Developed by', style: TextStyle(color: ts, fontSize: 12)),
+          const SizedBox(height: 4),
+          Text('Dhavarsanam Murugesh',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: tp, fontSize: 18, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 18),
+          SizedBox(width: double.infinity,
+              child: ElevatedButton(
+                  onPressed: () => Navigator.pop(dctx),
+                  style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF1A73E8),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      padding: const EdgeInsets.symmetric(vertical: 12)),
+                  child: const Text('Close', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)))),
+        ]),
+      ),
+    ));
   }
 
   // ---- Language picker ----

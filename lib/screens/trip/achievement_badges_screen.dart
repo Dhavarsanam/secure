@@ -21,7 +21,6 @@ class AchievementBadgesScreen extends StatefulWidget {
 }
 
 class _AchievementBadgesScreenState extends State<AchievementBadgesScreen> {
-  String? _justUnlocked;
 
   List<AchievementBadge> _getBadges(TripProvider trips, AuthProvider auth) {
     final completed = trips.completedTrips.length;

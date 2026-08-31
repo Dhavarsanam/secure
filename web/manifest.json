@@ -1,6 +1,6 @@
 {
-    "name": "secure_ride",
-    "short_name": "secure_ride",
+    "name": "SecureRide",
+    "short_name": "SecureRide",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",

@@ -76,6 +76,61 @@ class FirestoreService {
     }
   }
 
+  // ─── ADMIN: USERS ────────────────────────────────────
+  // Live list of every registered user — feeds the Admin Panel's User
+  // Management screen directly from Firestore, so it always reflects the
+  // real, current set of accounts (no static/dummy rows, no duplicates).
+
+  Stream<List<UserModel>> allUsersStream() {
+    return _db
+        .collection('users')
+        .orderBy('createdAt', descending: true)
+        .snapshots()
+        .map((snap) => snap.docs
+        .map((d) => UserModel.fromMap(d.data(), d.id))
+        .toList());
+  }
+
+  Future<bool> setUserVerified(String uid, bool verified) async {
+    try {
+      await _db.collection('users').doc(uid).update({
+        'isVerified': verified,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  Future<bool> setUserBlocked(String uid, bool blocked) async {
+    try {
+      await _db.collection('users').doc(uid).update({
+        'isBlocked': blocked,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  // Count of trips a specific user has created or joined — used to show a
+  // real per-user trip count on the Admin Panel without loading every trip
+  // document into memory (server-side aggregate count).
+  Future<int> userTripCount(String uid) async {
+    try {
+      final agg = await _db
+          .collection('trips')
+          .where('memberUids', arrayContains: uid)
+          .count()
+          .get();
+      return agg.count ?? 0;
+    } catch (e) {
+      return 0;
+    }
+  }
+
   // ─── TRIPS ───────────────────────────────────────────
 
   // Create trip
@@ -257,6 +312,37 @@ class FirestoreService {
     }
   }
 
+  // One-shot fetch of every trip a user created or joined — used by the
+  // Admin Panel to compute a real per-user Safety Score (completed /
+  // cancelled counts) on demand, without keeping a live listener open per
+  // user row.
+  Future<List<TripModel>> userTrips(String uid) async {
+    try {
+      final snap = await _db
+          .collection('trips')
+          .where('memberUids', arrayContains: uid)
+          .get();
+      return snap.docs.map((d) => TripModel.fromMap(d.data(), d.id)).toList();
+    } catch (e) {
+      return [];
+    }
+  }
+
+  // ─── ADMIN: TRIPS ────────────────────────────────────
+  // Live list of every trip in the system — feeds the Admin Panel's Trip
+  // Management screen and the Reports screen's charts, all from real
+  // Firestore data instead of static demo rows.
+
+  Stream<List<TripModel>> allTripsStream() {
+    return _db
+        .collection('trips')
+        .orderBy('createdAt', descending: true)
+        .snapshots()
+        .map((snap) => snap.docs
+        .map((doc) => TripModel.fromMap(doc.data(), doc.id))
+        .toList());
+  }
+
   // ─── SOS ALERTS ──────────────────────────────────────
 
   Future<String?> createSosAlert(Map<String, dynamic> alertData) async {
@@ -307,6 +393,20 @@ class FirestoreService {
         .where('senderUid', isEqualTo: uid)
         .snapshots()
         .map((snap) => snap.docs.map((d) => SosAlertModel.fromMap(d.data(), d.id)).toList());
+  }
+
+  // ─── ADMIN: SOS ALERTS ───────────────────────────────
+  // Live list of every SOS alert ever triggered — feeds the Admin Panel's
+  // SOS Monitor screen from real, current Firestore records.
+
+  Stream<List<SosAlertModel>> allSosAlertsStream() {
+    return _db
+        .collection('sos_alerts')
+        .orderBy('triggeredAt', descending: true)
+        .snapshots()
+        .map((snap) => snap.docs
+        .map((d) => SosAlertModel.fromMap(d.data(), d.id))
+        .toList());
   }
 
   // ─── USER ACTIVITY (login / logout / live-location shared) ───

@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SecureRide — Live SOS Location</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        * { box-sizing: border-box; }
+        html, body { margin:0; height:100%; font-family: -apple-system, Arial, Helvetica, sans-serif; background:#0B1220; }
+        #banner { padding:14px 16px; background:#DC2626; color:#fff; transition: background 0.3s; }
+        #banner.safe { background:#22C55E; }
+        #banner h1 { margin:0; font-size:17px; }
+        #banner p { margin:4px 0 0; font-size:13px; opacity:.9; }
+        #meta { padding:10px 16px; background:#fff; border-bottom:1px solid #E5E7EB; font-size:13px; color:#374151; line-height:1.6; }
+        #meta b { color:#111827; }
+        #map { height: calc(100vh - 140px); width:100%; }
+        #status { padding:9px 16px; font-size:11.5px; color:#6B7280; background:#fff; }
+        #loading { padding: 60px 16px; text-align:center; color:#9CA3AF; }
+    </style>
+</head>
+<body>
+<div id="banner">
+    <h1 id="bannerTitle">🚨 Loading SOS alert…</h1>
+    <p id="bannerSub">Fetching live location…</p>
+</div>
+<div id="meta"></div>
+<div id="map"><div id="loading">Loading map…</div></div>
+<div id="status">🔴 Live — this map updates automatically as they move. No need to refresh.</div>
+
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+    // Same Firebase Web config the Flutter app uses (see
+    // lib/firebase_options.dart). Firebase web API keys are not secret —
+    // access is controlled by Firestore Security Rules, not by hiding
+    // this key. Make sure your rules allow public READ (never write) on
+    // sos_alerts/{id} — see the sample firestore.rules added alongside
+    // this file.
+    const firebaseConfig = {
+      apiKey: "AIzaSyAh24uYRrnSmXJLW5Pg9P9kRuL75Xtq-Wk",
+      authDomain: "ride-4f466.firebaseapp.com",
+      projectId: "ride-4f466",
+      storageBucket: "ride-4f466.firebasestorage.app",
+      messagingSenderId: "1069568778365",
+      appId: "1:1069568778365:web:189dbb20061ed155b71114",
+    };
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.firestore();
+
+    const params = new URLSearchParams(window.location.search);
+    const alertId = params.get('id');
+
+    const bannerTitle = document.getElementById('bannerTitle');
+    const bannerSub = document.getElementById('bannerSub');
+    const banner = document.getElementById('banner');
+    const metaEl = document.getElementById('meta');
+    const mapEl = document.getElementById('map');
+    const statusEl = document.getElementById('status');
+
+    function fmtTime(ts) {
+      try { return ts && ts.toDate ? ts.toDate().toLocaleTimeString() : ''; }
+      catch (e) { return ''; }
+    }
+
+    if (!alertId) {
+      bannerTitle.textContent = 'No alert ID in this link';
+      bannerSub.textContent = 'This tracking link is missing its ID parameter.';
+      mapEl.innerHTML = '<div id="loading">Nothing to show.</div>';
+    } else {
+      let map, marker;
+      let firstFix = true;
+
+      db.collection('sos_alerts').doc(alertId).onSnapshot((doc) => {
+        if (!doc.exists) {
+          bannerTitle.textContent = 'Alert not found';
+          bannerSub.textContent = 'This SOS alert does not exist or was removed.';
+          mapEl.innerHTML = '<div id="loading">Nothing to show.</div>';
+          return;
+        }
+
+        const data = doc.data();
+        const lat = data.latitude;
+        const lng = data.longitude;
+        const isActive = data.status === 'active';
+
+        banner.className = isActive ? '' : 'safe';
+        bannerTitle.textContent = isActive
+          ? '🚨 ' + (data.senderName || 'Someone') + ' needs help'
+          : '✅ ' + (data.senderName || 'They') + ' marked themselves safe';
+        bannerSub.textContent = isActive
+          ? 'Live location — this map updates automatically as they move.'
+          : 'This SOS alert has been cancelled. Location updates have stopped.';
+
+        statusEl.textContent = isActive
+          ? '🔴 Live — this map updates automatically as they move. No need to refresh.'
+          : '⚪ Alert resolved — this was their last known location.';
+
+        const updatedAt = fmtTime(data.lastUpdated);
+        metaEl.innerHTML =
+          '<div><b>Contact:</b> ' + (data.senderPhone || 'N/A') + '</div>' +
+          '<div><b>Address:</b> ' + (data.locationAddress || 'Unknown') + '</div>' +
+          (updatedAt ? '<div><b>Last updated:</b> ' + updatedAt + '</div>' : '');
+
+        if (typeof lat !== 'number' || typeof lng !== 'number') return;
+
+        if (!map) {
+          mapEl.innerHTML = '';
+          map = L.map('map').setView([lat, lng], 16);
+          L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; OpenStreetMap contributors',
+            maxZoom: 19,
+          }).addTo(map);
+          marker = L.marker([lat, lng]).addTo(map);
+        } else {
+          marker.setLatLng([lat, lng]);
+        }
+
+        if (isActive) {
+          map.panTo([lat, lng]);
+        } else if (firstFix) {
+          map.setView([lat, lng], 16);
+        }
+        firstFix = false;
+      }, (err) => {
+        bannerTitle.textContent = 'Could not load this alert';
+        bannerSub.textContent = 'Check your internet connection, or Firestore rules may be blocking public read access.';
+        console.error(err);
+      });
+    }
+</script>
+</body>
+</html>

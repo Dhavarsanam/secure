@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
-import 'package:latlong2/latlong.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:flutter_phone_direct_caller/flutter_phone_direct_caller.dart';
@@ -125,12 +124,18 @@ class _SosScreenState extends State<SosScreen> {
     setState(() => _isTriggering = false);
 
     if (result['success'] != true) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('Could not send SOS: ${result['error'] ?? 'Unknown error'}'),
-          backgroundColor: _kDanger,
-          behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-          margin: const EdgeInsets.all(16)));
+      // Location is off specifically -> friendly dialog with a one-tap
+      // "Turn On Location" shortcut, instead of a generic error toast.
+      if (result['errorReason'] == 'serviceDisabled') {
+        _showLocationOffDialog();
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('Could not send SOS: ${result['error'] ?? 'Unknown error'}'),
+            backgroundColor: _kDanger,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            margin: const EdgeInsets.all(16)));
+      }
       return;
     }
 
@@ -145,34 +150,72 @@ class _SosScreenState extends State<SosScreen> {
       setState(() => _elapsed = DateTime.now().difference(_sosStartedAt!));
     });
 
-    // Share via SMS to every emergency contact's phone number, reusing the
-    // exact position triggerSos() already fetched (no second location call).
+    // Fire SMS (with the live-tracking link, to every dynamically-loaded
+    // emergency contact) and the auto-call to the primary contact AT THE
+    // SAME TIME, instead of one after the other.
     final phoneNumbers = contacts.map((c) => c.phone).where((p) => p.isNotEmpty).toList();
-    final smsOpened = await _sosService.shareSosViaSms(
+    final primary = contacts.first;
+
+    final smsFuture = _sosService.shareSosViaSms(
       phoneNumbers: phoneNumbers,
       senderName: user.fullName,
       senderPhone: user.phoneNumber,
+      trackingUrl: result['trackingUrl'] as String,
       lat: (result['lat'] as num).toDouble(),
       lng: (result['lng'] as num).toDouble(),
       address: result['address'] as String?,
     );
+    final callFuture = _callNumber(primary.phone);
+
+    // Wait for both to complete (they run concurrently, not sequentially).
+    final results = await Future.wait([smsFuture, callFuture.then((_) => true)]);
+    final smsOpened = results[0];
 
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         content: Text(smsOpened
-            ? '🚨 SOS Alert Sent! Opening SMS to your contacts...'
+            ? '🚨 SOS Alert Sent! Calling & messaging your contacts...'
             : '🚨 SOS Alert saved, but could not open the SMS app.'),
         backgroundColor: _kDanger,
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
         margin: const EdgeInsets.all(16), duration: const Duration(seconds: 4)));
 
-    // Auto-call the primary (first) emergency contact
-    final primary = contacts.first;
-    await _callNumber(primary.phone);
-
     // Refresh the on-screen live location too
     context.read<LocationProvider>().getCurrentLocation();
+  }
+
+  // Friendly prompt shown when SOS couldn't be sent because the device's
+  // location (GPS) is turned off — offers a one-tap shortcut to the
+  // system location-settings screen instead of a plain error toast.
+  void _showLocationOffDialog() {
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Row(children: [
+          Icon(Icons.location_off_rounded, color: _kDanger, size: 28),
+          SizedBox(width: 8),
+          Expanded(child: Text('Turn On Location')),
+        ]),
+        content: const Text(
+          'Your location is switched off, so SOS can\'t share where you are. '
+              'Please turn on location and try again.',
+          style: TextStyle(height: 1.5),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(context);
+              context.read<LocationProvider>().openDeviceLocationSettings();
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: _kDanger, foregroundColor: Colors.white),
+            child: const Text('Turn On Location'),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _cancelSos() async {

@@ -78,6 +78,28 @@ class SafetyScore {
     final cancelled = trips.cancelledTrips.length;
     final contacts = auth.currentUser?.emergencyContacts.length ?? 0;
     final locationOn = auth.currentUser?.isLocationSharing ?? false;
+    return calculateFromCounts(
+      total: total,
+      completed: completed,
+      cancelled: cancelled,
+      contactsCount: contacts,
+      locationOn: locationOn,
+    );
+  }
+
+  // Same weighted formula as [calculate], but driven by raw counts instead
+  // of the providers — lets other real data sources (e.g. the admin panel,
+  // which reads directly from Firestore instead of the signed-in user's
+  // providers) share the exact same scoring logic instead of re-deriving
+  // their own numbers.
+  static SafetyScore calculateFromCounts({
+    required int total,
+    required int completed,
+    required int cancelled,
+    required int contactsCount,
+    required bool locationOn,
+  }) {
+    final contacts = contactsCount;
 
     final tripScore = total == 0 ? 0.0 : (completed / total * 100).clamp(0.0, 100.0);
 
