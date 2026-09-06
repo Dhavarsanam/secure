@@ -13,9 +13,10 @@ android {
     compileSdk = flutter.compileSdkVersion
     // Pinned instead of flutter.ndkVersion (Flutter's bundled default) —
     // recent firebase_core/firebase_auth/cloud_firestore Android plugins
-    // require this specific NDK version and fail the build otherwise with
-    // a version-mismatch error during Gradle configuration.
-    ndkVersion = "27.0.12077973"
+    // require a newer NDK than Flutter's default and fail the build otherwise
+    // with a version-mismatch error during Gradle configuration. This must be
+    // the highest NDK any plugin requests (jni needs 28.2.13676358).
+    ndkVersion = "28.2.13676358"
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17

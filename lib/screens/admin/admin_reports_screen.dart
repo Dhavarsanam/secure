@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
+import 'package:share_plus/share_plus.dart';
 import '../../core/services/firestore_service.dart';
 import '../../models/trip_model.dart';
 import '../../models/user_model.dart';
@@ -29,6 +30,42 @@ class _AdminReportsScreenState extends State<AdminReportsScreen> {
       case 'This Month':
       default: return DateTime(now.year, now.month, 1);
     }
+  }
+
+  // Builds a plain-text summary of the currently-selected period's report
+  // (the same numbers already on screen) and hands it to the OS share
+  // sheet via share_plus — the admin can save it, email it, or send it to
+  // WhatsApp/Drive/etc. Real data only: everything passed in here came
+  // from the live Firestore streams already rendered above.
+  Future<void> _exportReport({
+    required int periodTripsCount,
+    required int periodNewUsers,
+    required double periodKm,
+    required List<Map<String, dynamic>> vehicleData,
+    required List<Map<String, dynamic>> topRoutes,
+  }) async {
+    final buffer = StringBuffer()
+      ..writeln('SecureRide Report — $_period')
+      ..writeln('Generated: ${DateFormat('dd MMM yyyy, hh:mm a').format(DateTime.now())}')
+      ..writeln()
+      ..writeln('Trips: $periodTripsCount')
+      ..writeln('New Users: $periodNewUsers')
+      ..writeln('Total KM: ${periodKm.toStringAsFixed(1)}')
+      ..writeln()
+      ..writeln('Vehicle Usage:');
+    for (final v in vehicleData) {
+      buffer.writeln('  ${v['type']}: ${v['count']} trips');
+    }
+    buffer.writeln();
+    buffer.writeln('Top Routes:');
+    for (final r in topRoutes) {
+      buffer.writeln('  ${r['from']} → ${r['to']}: ${r['count']} trips (${(r['km'] as double).toStringAsFixed(1)} km)');
+    }
+
+    await SharePlus.instance.share(ShareParams(
+      text: buffer.toString(),
+      subject: 'SecureRide Report — $_period',
+    ));
   }
 
   @override
@@ -132,6 +169,27 @@ class _AdminReportsScreenState extends State<AdminReportsScreen> {
                     const SizedBox(width: 12),
                     Expanded(child: _SosSummaryCard(periodStart: _periodStart, firestoreService: _firestoreService, card: card, tp: tp, ts: ts)),
                   ]),
+
+                  const SizedBox(height: 16),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      onPressed: () => _exportReport(
+                        periodTripsCount: periodTrips.length,
+                        periodNewUsers: periodNewUsers,
+                        periodKm: periodKm,
+                        vehicleData: vehicleData,
+                        topRoutes: topRoutesTop5,
+                      ),
+                      icon: const Icon(Icons.ios_share_rounded, size: 16, color: Color(0xFF7C3AED)),
+                      label: const Text('Export Report', style: TextStyle(color: Color(0xFF7C3AED), fontWeight: FontWeight.w600)),
+                      style: OutlinedButton.styleFrom(
+                        side: const BorderSide(color: Color(0xFF7C3AED)),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                      ),
+                    ),
+                  ),
 
                   const SizedBox(height: 24),
 

@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import '../../core/services/auth_service.dart';
+import '../../core/services/firestore_service.dart';
 import 'admin_dashboard_screen.dart';
 
 class AdminLoginScreen extends StatefulWidget {
@@ -8,15 +10,14 @@ class AdminLoginScreen extends StatefulWidget {
 }
 
 class _AdminLoginScreenState extends State<AdminLoginScreen> {
-  final _emailCtrl = TextEditingController(text: 'admin@secureride.com');
+  final _emailCtrl = TextEditingController();
   final _passCtrl = TextEditingController();
   bool _obscure = true;
   bool _loading = false;
   String? _error;
 
-  // Demo credentials
-  static const _adminEmail = 'admin@secureride.com';
-  static const _adminPass = 'admin123';
+  final _authService = AuthService();
+  final _firestoreService = FirestoreService();
 
   // Admin-branded palette (purple accent kept for admin identity)
   static const Color _tp = Colors.white;        // primary text
@@ -26,15 +27,36 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
   @override
   void dispose() { _emailCtrl.dispose(); _passCtrl.dispose(); super.dispose(); }
 
+  // Real Firebase Auth sign-in (the password is verified by Firebase, not
+  // compared against a string in the app) followed by an authorization
+  // check: the signed-in account must have isAdmin: true on its Firestore
+  // `users` document. Any account that isn't flagged as admin is signed
+  // back out immediately, so a regular rider account can never reach the
+  // dashboard just by guessing/knowing its own password.
   Future<void> _login() async {
     setState(() { _loading = true; _error = null; });
-    await Future.delayed(const Duration(seconds: 1));
-    if (_emailCtrl.text.trim() == _adminEmail && _passCtrl.text.trim() == _adminPass) {
-      if (mounted) {
-        Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const AdminDashboardScreen()));
-      }
-    } else {
-      setState(() { _error = 'Invalid admin credentials!'; _loading = false; });
+
+    final result = await _authService.signIn(
+      email: _emailCtrl.text.trim(),
+      password: _passCtrl.text,
+    );
+
+    if (result['success'] != true) {
+      setState(() { _error = result['error'] ?? 'Login failed. Please try again.'; _loading = false; });
+      return;
+    }
+
+    final uid = result['user'].uid as String;
+    final isAdmin = await _firestoreService.isUserAdmin(uid);
+
+    if (!isAdmin) {
+      await _authService.signOut();
+      setState(() { _error = 'This account is not authorized for admin access.'; _loading = false; });
+      return;
+    }
+
+    if (mounted) {
+      Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const AdminDashboardScreen()));
     }
   }
 
@@ -151,9 +173,9 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
                         const Icon(Icons.info_outline, color: Color(0xFFC4B5FD), size: 16),
                         const SizedBox(width: 8),
                         Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                          const Text('Demo Credentials', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFFC4B5FD))),
-                          Text('Email: admin@secureride.com', style: TextStyle(fontSize: 11, color: _ts.withValues(alpha: 0.85))),
-                          Text('Password: admin123', style: TextStyle(fontSize: 11, color: _ts.withValues(alpha: 0.85))),
+                          const Text('Admin access', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFFC4B5FD))),
+                          Text('Sign in with a regular SecureRide account that has isAdmin: true set on its Firestore user document.',
+                              style: TextStyle(fontSize: 11, color: _ts.withValues(alpha: 0.85))),
                         ])),
                       ])),
 

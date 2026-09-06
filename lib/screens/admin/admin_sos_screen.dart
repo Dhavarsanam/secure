@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../core/services/firestore_service.dart';
 import '../../models/sos_alert_model.dart';
 import '../../providers/theme_provider.dart';
@@ -35,6 +36,32 @@ class _AdminSosScreenState extends State<AdminSosScreen> with SingleTickerProvid
     if (!ok && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         content: const Text('Could not resolve this alert'),
+        backgroundColor: const Color(0xFFEF4444),
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        margin: const EdgeInsets.all(16),
+      ));
+    }
+  }
+
+  // Real phone call via the device dialer (tel: URI), replacing the old
+  // "Calling..." snackbar that never actually dialed anyone.
+  Future<void> _call(String phone) async {
+    if (phone.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: const Text('No phone number on file for this user'),
+        backgroundColor: const Color(0xFFEF4444),
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        margin: const EdgeInsets.all(16),
+      ));
+      return;
+    }
+    final uri = Uri(scheme: 'tel', path: phone);
+    final launched = await launchUrl(uri);
+    if (!launched && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: const Text('Could not open the dialer on this device'),
         backgroundColor: const Color(0xFFEF4444),
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
@@ -99,7 +126,8 @@ class _AdminSosScreenState extends State<AdminSosScreen> with SingleTickerProvid
                     ...active.map((alert) => _SosCard(
                         key: ValueKey(alert.alertId),
                         alert: alert, isActive: true, card: card, tp: tp, ts: ts,
-                        onResolve: () => _resolve(alert))),
+                        onResolve: () => _resolve(alert),
+                        onCall: () => _call(alert.senderPhone))),
                     const SizedBox(height: 20),
                   ],
 
@@ -111,7 +139,7 @@ class _AdminSosScreenState extends State<AdminSosScreen> with SingleTickerProvid
                     ...resolved.map((alert) => _SosCard(
                         key: ValueKey(alert.alertId),
                         alert: alert, isActive: false, card: card, tp: tp, ts: ts,
-                        onResolve: () {})),
+                        onResolve: () {}, onCall: () {})),
                 ]),
               ),
             ),
@@ -161,7 +189,8 @@ class _SosCard extends StatelessWidget {
   final bool isActive;
   final Color card, tp, ts;
   final VoidCallback onResolve;
-  const _SosCard({super.key, required this.alert, required this.isActive, required this.card, required this.tp, required this.ts, required this.onResolve});
+  final VoidCallback onCall;
+  const _SosCard({super.key, required this.alert, required this.isActive, required this.card, required this.tp, required this.ts, required this.onResolve, required this.onCall});
 
   @override
   Widget build(BuildContext context) {
@@ -223,13 +252,7 @@ class _SosCard extends StatelessWidget {
           const SizedBox(height: 10),
           Row(children: [
             Expanded(child: OutlinedButton.icon(
-              onPressed: () => ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                content: Text('Calling ${alert.senderName}...'),
-                backgroundColor: const Color(0xFF1A73E8),
-                behavior: SnackBarBehavior.floating,
-                margin: const EdgeInsets.all(16),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-              )),
+              onPressed: onCall,
               icon: const Icon(Icons.phone_rounded, size: 14, color: Color(0xFF1A73E8)),
               label: const Text('Call', style: TextStyle(color: Color(0xFF1A73E8), fontSize: 12)),
               style: OutlinedButton.styleFrom(side: const BorderSide(color: Color(0xFF1A73E8)),

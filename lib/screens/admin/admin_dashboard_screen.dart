@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../../core/services/auth_service.dart';
 import '../../core/services/firestore_service.dart';
 import '../../models/sos_alert_model.dart';
 import '../../models/trip_model.dart';
@@ -109,6 +110,7 @@ class _DashboardTab extends StatefulWidget {
 
 class _DashboardTabState extends State<_DashboardTab> {
   final _firestoreService = FirestoreService();
+  final _authService = AuthService();
 
   void _showSnack(BuildContext context, String msg, Color color) {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -143,10 +145,20 @@ class _DashboardTabState extends State<_DashboardTab> {
         actions: [
           TextButton(onPressed: () => Navigator.pop(dctx), child: const Text('Cancel', style: TextStyle(color: Color(0xFF94A3B8)))),
           ElevatedButton(
-            onPressed: () {
+            onPressed: () async {
               final text = ctrl.text.trim();
               Navigator.pop(dctx);
-              _showSnack(context, text.isEmpty ? 'Message cannot be empty' : 'Broadcast sent to all users', text.isEmpty ? const Color(0xFFEF4444) : const Color(0xFFF59E0B));
+              if (text.isEmpty) {
+                _showSnack(context, 'Message cannot be empty', const Color(0xFFEF4444));
+                return;
+              }
+              final ok = await _firestoreService.sendBroadcast(
+                text,
+                sentBy: _authService.currentUser?.email ?? 'admin',
+              );
+              if (!context.mounted) return;
+              _showSnack(context, ok ? 'Broadcast sent to all users' : 'Could not send broadcast — try again',
+                  ok ? const Color(0xFF22C55E) : const Color(0xFFEF4444));
             },
             style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF7C3AED), foregroundColor: Colors.white),
             child: const Text('Send'),
@@ -177,12 +189,15 @@ class _DashboardTabState extends State<_DashboardTab> {
           ],
         ));
 
-    if (ok == true && context.mounted) {
-      Navigator.pushAndRemoveUntil(
-        context,
-        MaterialPageRoute(builder: (_) => const LoginScreen()),
-            (route) => false,
-      );
+    if (ok == true) {
+      await _authService.signOut();
+      if (context.mounted) {
+        Navigator.pushAndRemoveUntil(
+          context,
+          MaterialPageRoute(builder: (_) => const LoginScreen()),
+              (route) => false,
+        );
+      }
     }
   }
 

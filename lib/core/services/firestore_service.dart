@@ -115,6 +115,39 @@ class FirestoreService {
     }
   }
 
+  // Real admin-authorization check — used right after Firebase Auth signs
+  // an admin in (see AdminLoginScreen). The password itself is verified
+  // by Firebase Auth; this only confirms the signed-in account is flagged
+  // isAdmin: true on its Firestore profile. NOTE: this is a client-side
+  // check only — for real security the same rule (only isAdmin accounts
+  // may read the admin collections/fields) must also be enforced in your
+  // Firestore Security Rules, otherwise a user could edit their own
+  // isAdmin field directly through the SDK.
+  Future<bool> isUserAdmin(String uid) async {
+    try {
+      final doc = await _db.collection('users').doc(uid).get();
+      if (!doc.exists) return false;
+      return (doc.data()?['isAdmin'] ?? false) == true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  // Deletes a user's Firestore profile (removes them from every Admin
+  // Panel list/stream immediately). This does NOT delete their Firebase
+  // Auth account — a client app can never delete another user's Auth
+  // account; that requires the Firebase Admin SDK from a trusted backend
+  // (e.g. a Cloud Function the admin panel could call). Document this
+  // limit to the admin using this screen.
+  Future<bool> deleteUserRecord(String uid) async {
+    try {
+      await _db.collection('users').doc(uid).delete();
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
   // Count of trips a specific user has created or joined — used to show a
   // real per-user trip count on the Admin Panel without loading every trip
   // document into memory (server-side aggregate count).
@@ -343,6 +376,17 @@ class FirestoreService {
         .toList());
   }
 
+  // Permanently removes a trip document — used by the Admin Panel's Trip
+  // Management screen to take down a bad/duplicate/test trip.
+  Future<bool> deleteTrip(String tripId) async {
+    try {
+      await _db.collection('trips').doc(tripId).delete();
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
   // ─── SOS ALERTS ──────────────────────────────────────
 
   Future<String?> createSosAlert(Map<String, dynamic> alertData) async {
@@ -407,6 +451,26 @@ class FirestoreService {
         .map((snap) => snap.docs
         .map((d) => SosAlertModel.fromMap(d.data(), d.id))
         .toList());
+  }
+
+  // ─── ADMIN: BROADCASTS ───────────────────────────────
+  // Real, persisted broadcast messages sent from the Admin Panel dashboard
+  // (previously this only showed a snackbar and saved nothing). Stored so
+  // every broadcast has a durable record of what was sent, when, and by
+  // whom — a future notifications feature can read this same collection
+  // to actually deliver it to users.
+
+  Future<bool> sendBroadcast(String message, {required String sentBy}) async {
+    try {
+      await _db.collection('broadcasts').add({
+        'message': message,
+        'sentBy': sentBy,
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+      return true;
+    } catch (e) {
+      return false;
+    }
   }
 
   // ─── USER ACTIVITY (login / logout / live-location shared) ───

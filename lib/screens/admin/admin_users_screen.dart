@@ -49,6 +49,37 @@ class _AdminUsersScreenState extends State<AdminUsersScreen> {
     if (!ok && mounted) _showSnack('Could not update block status', const Color(0xFFEF4444));
   }
 
+  // Deletes the user's Firestore profile after a confirmation dialog. Their
+  // Firebase Auth login itself can't be deleted from a client app (that
+  // needs the Admin SDK on a backend) — the dialog says so up front so the
+  // admin isn't surprised the email could still technically sign in.
+  Future<void> _deleteUser(UserModel user) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Delete this user?'),
+        content: Text(
+          'This permanently removes ${user.fullName}\'s profile, trips history visibility, and admin records for this account. '
+              'Their login itself can only be fully disabled from the Firebase console.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dctx, false), child: const Text('Cancel')),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(dctx, true),
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFEF4444), foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    final ok = await _firestoreService.deleteUserRecord(user.uid);
+    if (!mounted) return;
+    _showSnack(ok ? 'User deleted' : 'Could not delete user', ok ? const Color(0xFF22C55E) : const Color(0xFFEF4444));
+  }
+
   void _showSnack(String msg, Color color) {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
       content: Text(msg),
@@ -224,6 +255,14 @@ class _AdminUsersScreenState extends State<AdminUsersScreen> {
               )),
             ]),
             const SizedBox(height: 8),
+            SizedBox(width: double.infinity, child: TextButton.icon(
+              onPressed: () async {
+                Navigator.pop(sheetCtx);
+                await _deleteUser(user);
+              },
+              icon: const Icon(Icons.delete_outline_rounded, color: Color(0xFFEF4444), size: 18),
+              label: const Text('Delete User', style: TextStyle(color: Color(0xFFEF4444), fontWeight: FontWeight.w600)),
+            )),
           ]),
         ));
   }

@@ -37,6 +37,40 @@ class _AdminTripsScreenState extends State<AdminTripsScreen> with SingleTickerPr
     return matchSearch && matchStatus;
   }).toList();
 
+  void _showSnack(String msg, Color color) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(msg),
+      backgroundColor: color,
+      behavior: SnackBarBehavior.floating,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      margin: const EdgeInsets.all(16),
+    ));
+  }
+
+  Future<void> _deleteTrip(TripModel trip) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Delete this trip?'),
+        content: Text('Trip #${trip.tripCode} (${trip.startLocationName} → ${trip.destinationName}) will be permanently removed for every member.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dctx, false), child: const Text('Cancel')),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(dctx, true),
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFEF4444), foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    final ok = await _firestoreService.deleteTrip(trip.tripId);
+    if (!mounted) return;
+    _showSnack(ok ? 'Trip deleted' : 'Could not delete trip', ok ? const Color(0xFF22C55E) : const Color(0xFFEF4444));
+  }
+
   Color _statusColor(TripStatus s) {
     switch (s) {
       case TripStatus.active: return const Color(0xFF22C55E);
@@ -128,6 +162,13 @@ class _AdminTripsScreenState extends State<AdminTripsScreen> with SingleTickerPr
                                   child: Text(trip.status.name.toUpperCase(), style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.bold))),
                               const Spacer(),
                               Text(DateFormat('dd MMM yyyy').format(trip.travelDate), style: TextStyle(fontSize: 11, color: ts)),
+                              IconButton(
+                                onPressed: () => _deleteTrip(trip),
+                                icon: const Icon(Icons.delete_outline_rounded, size: 18, color: Color(0xFFEF4444)),
+                                visualDensity: VisualDensity.compact,
+                                constraints: const BoxConstraints(),
+                                padding: const EdgeInsets.only(left: 8),
+                              ),
                             ]),
                             const SizedBox(height: 8),
                             Row(children: [

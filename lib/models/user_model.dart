@@ -14,6 +14,12 @@ class UserModel {
   // Management screen). Real, persisted Firestore fields — not demo data.
   final bool isVerified;
   final bool isBlocked;
+  // Grants access to the Admin Panel (see AdminLoginScreen). Only ever set
+  // manually on a user's Firestore document — there is no in-app UI that
+  // sets this, so it must be enabled by a developer/existing admin
+  // directly in the Firebase console (or via a Cloud Function), not by
+  // any client-side write path.
+  final bool isAdmin;
   final DateTime createdAt;
   final DateTime updatedAt;
 
@@ -28,6 +34,7 @@ class UserModel {
     this.isLocationSharing = false,
     this.isVerified = false,
     this.isBlocked = false,
+    this.isAdmin = false,
     required this.createdAt,
     required this.updatedAt,
   });
@@ -46,6 +53,7 @@ class UserModel {
       isLocationSharing: map['isLocationSharing'] ?? false,
       isVerified: map['isVerified'] ?? false,
       isBlocked: map['isBlocked'] ?? false,
+      isAdmin: map['isAdmin'] ?? false,
       createdAt: (map['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
       updatedAt: (map['updatedAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
     );
@@ -63,6 +71,7 @@ class UserModel {
       'isLocationSharing': isLocationSharing,
       'isVerified': isVerified,
       'isBlocked': isBlocked,
+      'isAdmin': isAdmin,
       'createdAt': Timestamp.fromDate(createdAt),
       'updatedAt': Timestamp.fromDate(updatedAt),
     };
@@ -79,6 +88,7 @@ class UserModel {
     bool? isLocationSharing,
     bool? isVerified,
     bool? isBlocked,
+    bool? isAdmin,
     DateTime? createdAt,
     DateTime? updatedAt,
   }) {
@@ -93,6 +103,7 @@ class UserModel {
       isLocationSharing: isLocationSharing ?? this.isLocationSharing,
       isVerified: isVerified ?? this.isVerified,
       isBlocked: isBlocked ?? this.isBlocked,
+      isAdmin: isAdmin ?? this.isAdmin,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
     );
